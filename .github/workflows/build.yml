@@ -68,6 +68,37 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      # The sandbox that drives this repo cannot reach the Actions artifact/log CDN (only
+      # github.com and git transport are reachable), so a successful run publishes the APKs back to
+      # the branch where they can be fetched with a plain `git pull`. [skip ci] prevents a loop.
+      - name: Publish APKs
+        if: ${{ success() }}
+        shell: bash
+        run: |
+          git config user.name "island-ci"
+          git config user.email "ci@island.local"
+          mkdir -p dist
+          cp app/build/outputs/apk/release/*.apk dist/island-release.apk 2>/dev/null || true
+          cp app/build/outputs/apk/debug/*.apk dist/island-debug.apk 2>/dev/null || true
+          # A debug APK carries every Compose icon unshaken; skip it if it would bloat the repo.
+          if [ -f dist/island-debug.apk ] && [ "$(stat -c%s dist/island-debug.apk)" -gt 26214400 ]; then
+            echo "debug APK is $(stat -c%s dist/island-debug.apk) bytes — not committing it"
+            rm -f dist/island-debug.apk
+          fi
+          {
+            echo "built from ${GITHUB_SHA}"
+            echo "gradle: $(./gradlew --version 2>/dev/null | awk -F': ' '/^Gradle /{print $2; exit}')"
+            echo
+            ls -la dist
+          } > dist/BUILD-INFO.txt
+          git add -f dist
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: publish APKs for ${GITHUB_SHA::7} [skip ci]"
+            git push origin HEAD:"${GITHUB_REF_NAME}" || echo "apk push failed"
+          else
+            echo "no APK changes to publish"
+          fi
+
       # The sandbox that drives this repo cannot reach the Actions log CDN, so a failing run
       # publishes its logs back to the branch. [skip ci] prevents a workflow loop.
       - name: Publish failure logs

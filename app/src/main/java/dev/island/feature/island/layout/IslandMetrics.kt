@@ -173,8 +173,12 @@ object IslandMetrics {
     }
 
     /**
-     * Horizontal placement. Centred by default; if the device has an unusual cutout that the
-     * centred pill would cover, the pill shifts just enough to clear it.
+     * Horizontal placement. Centred by default.
+     *
+     * With [IslandPosition.AUTO_CUTOUT] on a punch-hole device the pill deliberately covers the
+     * camera — that is the look the whole app is built around — so no shift is applied. For any
+     * other placement, an overlap with the cutout shifts the pill by the smallest amount that
+     * clears it.
      */
     private fun centeredX(
         input: IslandLayoutInput,
