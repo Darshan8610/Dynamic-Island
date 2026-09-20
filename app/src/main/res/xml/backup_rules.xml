@@ -1,9 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Island backs up the user's configuration and nothing else.
+
+    Because these rules use <include>, everything not listed is excluded automatically — that
+    deliberately covers the local event history (files/island_history.json), any export the user
+    generated (cache/exports/) and cached artwork. Android never backs up the cache domain, so it
+    takes no rule here.
+-->
 <full-backup-content>
-    <!-- Back up preferences so a restored device keeps the user's Island configuration. -->
+    <!-- Preferences and DataStore keep the island's settings across a device restore. -->
     <include domain="sharedpref" path="." />
     <include domain="file" path="datastore/" />
-    <!-- Privacy: the local event history and log exports are never backed up. -->
-    <exclude domain="file" path="island_history.json" />
-    <exclude domain="cache" path="exports/" />
 </full-backup-content>

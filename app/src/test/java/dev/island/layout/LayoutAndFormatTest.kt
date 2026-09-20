@@ -298,7 +298,8 @@ class TestEventsSanityTest {
     fun `fixtures are usable by every test without Android`() {
         val notification = TestEvents.notification()
         assertEquals(IslandEventType.NOTIFICATION, notification.type)
-        assertEquals("com.example.chat", notification.sourcePackage)
+        assertEquals("com.example.chat", notification.notification.packageName)
+        assertEquals("com.example.n1", notification.sourcePackage)
 
         val media = TestEvents.media()
         assertTrue(media.persistent)

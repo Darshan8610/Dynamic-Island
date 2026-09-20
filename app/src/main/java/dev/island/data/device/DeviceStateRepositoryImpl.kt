@@ -15,6 +15,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.core.content.ContextCompat
 import dev.island.core.logging.IslandLogger
 import dev.island.domain.model.DeviceContext
 import dev.island.domain.repository.DeviceStateRepository
@@ -73,13 +74,15 @@ class DeviceStateRepositoryImpl(
         if (started) return
         started = true
         runCatching {
-            context.registerReceiver(
+            ContextCompat.registerReceiver(
+                context,
                 screenReceiver,
                 IntentFilter().apply {
                     addAction(Intent.ACTION_SCREEN_ON)
                     addAction(Intent.ACTION_SCREEN_OFF)
                     addAction(Intent.ACTION_USER_PRESENT)
                 },
+                ContextCompat.RECEIVER_NOT_EXPORTED,
             )
         }.onFailure { logger.w(TAG, "screen receiver failed", it) }
 

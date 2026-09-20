@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import androidx.core.content.ContextCompat
 import android.os.BatteryManager
 import dev.island.core.logging.IslandLogger
 import dev.island.domain.model.BatteryHealth
@@ -39,7 +40,9 @@ class BatteryMonitor(private val context: Context, private val logger: IslandLog
             addAction(Intent.ACTION_POWER_CONNECTED)
             addAction(Intent.ACTION_POWER_DISCONNECTED)
         }
-        runCatching { context.registerReceiver(receiver, filter) }
+        runCatching {
+            ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        }
             .onFailure { logger.w(TAG, "battery receiver registration failed", it) }
 
         // Seed with the sticky value so subscribers do not wait for the next 1% change.

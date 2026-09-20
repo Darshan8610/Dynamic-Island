@@ -1,13 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android 12+ replacement for full-backup-content.
+
+    Same posture as backup_rules.xml: an include-list, so the local event history and any user
+    export stay on the device. <device-transfer> is listed separately because a cable/D2D move is
+    a different code path from a cloud restore — both must be restricted.
+-->
 <data-extraction-rules>
     <cloud-backup>
+        <include domain="sharedpref" path="." />
         <include domain="file" path="datastore/" />
-        <exclude domain="file" path="island_history.json" />
-        <exclude domain="cache" path="exports/" />
     </cloud-backup>
     <device-transfer>
+        <include domain="sharedpref" path="." />
         <include domain="file" path="datastore/" />
-        <exclude domain="file" path="island_history.json" />
-        <exclude domain="cache" path="exports/" />
     </device-transfer>
 </data-extraction-rules>

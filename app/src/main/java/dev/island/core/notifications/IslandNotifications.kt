@@ -1,5 +1,6 @@
 package dev.island.core.notifications
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationChannelGroup
@@ -183,6 +184,8 @@ object IslandNotifications {
             .build()
     }
 
+    // Guarded by areNotificationsEnabled() below; POST_NOTIFICATIONS is optional by design.
+    @SuppressLint("MissingPermission")
     fun post(context: Context, id: Int, notification: Notification) {
         // POST_NOTIFICATIONS is optional: if it is missing we simply do not post.
         val allowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||

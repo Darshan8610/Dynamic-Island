@@ -184,7 +184,13 @@ object IslandMetrics {
         cutoutAware: Boolean = true,
     ): Float {
         val centered = ((input.screenWidthDp - width) / 2f) + input.appearance.horizontalOffsetDp
-        if (!cutoutAware || !input.hasCutout) return centered.coerceAtLeast(SIDE_MARGIN_DP / 2f)
+        // Covering a centred punch hole is the whole point of AUTO_CUTOUT: the pill must stay
+        // centred on the camera instead of dodging it. Only an *unintended* overlap shifts the pill.
+        val deliberatelyCovering = input.position == IslandPosition.AUTO_CUTOUT &&
+            input.cutoutKind in punchHoleKinds
+        if (!cutoutAware || !input.hasCutout || deliberatelyCovering) {
+            return centered.coerceAtLeast(SIDE_MARGIN_DP / 2f)
+        }
 
         val pillLeft = centered
         val pillRight = centered + width

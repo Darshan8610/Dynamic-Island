@@ -370,13 +370,20 @@ class IslandStateMachineTest {
             IslandPhase.IDLE,
             IslandStateMachine.next(IslandPhase.COLLAPSED, IslandTrigger.ScreenTurnedOff, withEvents),
         )
+        // An empty queue animates out; only the finished animation settles on IDLE. Jumping straight
+        // to IDLE would be the "abrupt visible = false" this app forbids.
+        val empty = TransitionContext(hasEvents = false)
         assertEquals(
-            IslandPhase.IDLE,
+            IslandPhase.COLLAPSING,
             IslandStateMachine.next(
                 IslandPhase.COLLAPSED,
                 IslandTrigger.EventRemoved(remainingEvents = 0),
-                TransitionContext(hasEvents = false),
+                empty,
             ),
+        )
+        assertEquals(
+            IslandPhase.IDLE,
+            IslandStateMachine.next(IslandPhase.COLLAPSING, IslandTrigger.AnimationCompleted, empty),
         )
     }
 }

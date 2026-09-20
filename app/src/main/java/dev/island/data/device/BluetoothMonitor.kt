@@ -1,5 +1,6 @@
 package dev.island.data.device
 
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
@@ -80,7 +81,9 @@ class BluetoothMonitor(
             addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
             addAction(Intent.ACTION_HEADSET_PLUG)
         }
-        runCatching { context.registerReceiver(receiver, filter) }
+        runCatching {
+            ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        }
             .onFailure { logger.w(TAG, "bluetooth receiver registration failed", it) }
 
         awaitClose {
@@ -110,6 +113,8 @@ class BluetoothMonitor(
         }
     }.onFailure { logger.d(TAG, "no device extra on connection broadcast") }.getOrNull()
 
+    // Guarded by hasConnectPermission() above; lint does not follow helper methods.
+    @SuppressLint("MissingPermission")
     private fun classify(device: BluetoothDevice?): ConnectedDeviceKind {
         if (device == null) return ConnectedDeviceKind.BLUETOOTH_AUDIO
         // Every BluetoothDevice accessor needs BLUETOOTH_CONNECT on Android 12+.
@@ -146,6 +151,7 @@ class BluetoothMonitor(
     }
 
     /** Requires BLUETOOTH_CONNECT on Android 12+; returns null instead of throwing when missing. */
+    @SuppressLint("MissingPermission")
     private fun deviceName(device: BluetoothDevice?): String? {
         if (device == null) return null
         if (!hasConnectPermission()) {

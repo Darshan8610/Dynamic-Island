@@ -1,5 +1,6 @@
 package dev.island.data.device
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioManager
@@ -159,6 +160,8 @@ class CallStateMonitor(
 
     fun isMuted(): Boolean = runCatching { audioManager?.isMicrophoneMute ?: false }.getOrDefault(false)
 
+    // Guarded by canControlCalls(), which checks ANSWER_PHONE_CALLS.
+    @SuppressLint("MissingPermission")
     fun answer() {
         if (!canControlCalls()) {
             logger.w(TAG, "answer ignored: ANSWER_PHONE_CALLS not granted")
@@ -168,6 +171,8 @@ class CallStateMonitor(
             .onFailure { logger.w(TAG, "answer failed", it) }
     }
 
+    // Guarded by canControlCalls(), which checks ANSWER_PHONE_CALLS.
+    @SuppressLint("MissingPermission")
     fun endCall() {
         if (!canControlCalls()) {
             logger.w(TAG, "end ignored: ANSWER_PHONE_CALLS not granted")

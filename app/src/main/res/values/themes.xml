@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <!--
       Platform theme: a minimal dark launch backdrop. The real theme is applied in Compose
       (core/ui/theme) so that the same tokens drive both the app UI and the overlay island.
+
+      The three items marked tools:targetApi were added in API 27/29. minSdk is 26, and Android
+      ignores theme attributes it does not know, so on API 26 the launch window simply keeps the
+      platform defaults — no crash and no visual difference the user can see, because
+      enableEdgeToEdge() sets the same properties at runtime where they exist.
     -->
     <style name="Theme.Island" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/island_background</item>
@@ -10,9 +15,9 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
-        <item name="android:enforceStatusBarContrast">false</item>
-        <item name="android:enforceNavigationBarContrast">false</item>
+        <item name="android:enforceStatusBarContrast" tools:targetApi="29">false</item>
+        <item name="android:enforceNavigationBarContrast" tools:targetApi="29">false</item>
     </style>
 </resources>

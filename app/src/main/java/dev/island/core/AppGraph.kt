@@ -1,5 +1,6 @@
 package dev.island.core
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.drawable.Drawable
@@ -54,6 +55,10 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * Everything here lives for the lifetime of the process; nothing here holds an Activity.
  */
+// Every field here holds the *application* context for the lifetime of the process, which is
+// exactly what a composition root is for; nothing in this graph can outlive the process or leak
+// an Activity.
+@SuppressLint("StaticFieldLeak")
 object AppGraph {
 
     private const val TAG = "AppGraph"

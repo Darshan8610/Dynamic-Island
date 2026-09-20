@@ -33,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -294,7 +295,7 @@ private fun StopwatchSection() {
     val running = state?.running == true
 
     // The stopwatch is the one screen that needs its own tick; 10Hz matches the tenths we render.
-    var now by remember { mutableStateOf(android.os.SystemClock.elapsedRealtime()) }
+    var now by remember { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
     LaunchedEffect(running) {
         if (!running) return@LaunchedEffect
         while (true) {

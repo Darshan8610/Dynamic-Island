@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import androidx.core.content.ContextCompat
 import dev.island.core.logging.IslandLogger
 import dev.island.domain.engine.IslandClock
 import dev.island.domain.model.AlarmInfo
@@ -38,7 +39,12 @@ class AlarmMonitor(
             }
         }
         runCatching {
-            context.registerReceiver(receiver, IntentFilter(AlarmManager.ACTION_NEXT_ALARM_CLOCK_CHANGED))
+            ContextCompat.registerReceiver(
+                context,
+                receiver,
+                IntentFilter(AlarmManager.ACTION_NEXT_ALARM_CLOCK_CHANGED),
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
         }.onFailure { logger.w(TAG, "alarm receiver registration failed", it) }
 
         trySend(current())
