@@ -290,8 +290,10 @@ Instrumented tests (`app/src/androidTest`) cover the half a JVM cannot:
   sender, timer label, grouped-notification count. This is what catches "it compiles but draws nothing".
 
 CI compiles the instrumented suite on every push so it cannot rot, and runs it on an emulator through
-the manual `ui-tests` job (`gh workflow run build.yml --ref <branch>`) — booting an AVD costs more than
-the whole JVM build, so a push does not wait for it. Overlay attachment, real window flags and live
+the opt-in `ui-tests` job — booting an AVD costs more than the whole JVM build, so an ordinary push
+does not wait for it. Trigger it from the Actions tab, with `gh workflow run build.yml --ref <branch>`,
+or by putting `[ui]` in a commit message (the last route works even for a token that cannot dispatch
+workflows). Overlay attachment, real window flags and live
 `MediaSession` interaction are still exercised by hand through **Demo mode** and the **Diagnostics**
 screen, which report the live state of every capability.
 
