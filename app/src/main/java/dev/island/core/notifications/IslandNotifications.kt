@@ -52,7 +52,7 @@ object IslandNotifications {
             setShowBadge(false)
             enableVibration(false)
             enableLights(false)
-            group = GROUP_ID
+            setGroup(GROUP_ID)
         }
 
         val timers = NotificationChannel(
@@ -62,7 +62,7 @@ object IslandNotifications {
         ).apply {
             description = context.getString(R.string.channel_timers_description)
             setShowBadge(false)
-            group = GROUP_ID
+            setGroup(GROUP_ID)
         }
 
         val alerts = NotificationChannel(
@@ -73,7 +73,7 @@ object IslandNotifications {
             description = context.getString(R.string.channel_alerts_description)
             enableVibration(true)
             enableLights(true)
-            group = GROUP_ID
+            setGroup(GROUP_ID)
         }
 
         runCatching { manager.createNotificationChannels(listOf(service, timers, alerts)) }

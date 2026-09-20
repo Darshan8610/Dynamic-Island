@@ -75,8 +75,7 @@ class MediaSessionRepositoryImpl(
             refreshSessions("session destroyed")
         }
 
-        override fun onSessionReleased() = refreshSessions("session released")
-        override fun onAudioInfoChanged(info: MediaController.PlaybackInfo?) = publish("audioInfo")
+        override fun onAudioInfoChanged(info: MediaController.PlaybackInfo) = publish("audioInfo")
     }
 
     override fun start() {

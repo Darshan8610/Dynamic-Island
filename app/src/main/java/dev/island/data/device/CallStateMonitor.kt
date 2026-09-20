@@ -42,7 +42,7 @@ class CallStateMonitor(
         context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
     private val telecomManager =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            context.getSystemService(Context.TELECOM_MANAGER_SERVICE) as? TelecomManager
+            context.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
         } else {
             null
         }

@@ -13,10 +13,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.setViewTreeLifecycleOwner
-import androidx.lifecycle.setViewTreeSavedStateRegistryOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import dev.island.MainActivity
 import dev.island.R
@@ -473,7 +474,7 @@ class IslandService : LifecycleService() {
          */
         fun start(context: Context) {
             val intent = Intent(context, IslandService::class.java).setAction(ACTION_START)
-            runCatching { ServiceCompat.startForegroundService(context, intent) }
+            runCatching { ContextCompat.startForegroundService(context, intent) }
         }
 
         fun stop(context: Context) {

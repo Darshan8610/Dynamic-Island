@@ -1,6 +1,7 @@
 package dev.island.data.notifications
 
 import android.app.Notification
+import android.app.NotificationManager
 import android.app.Person
 import android.content.Context
 import android.os.Build
@@ -45,11 +46,11 @@ class NotificationEventFactory(
         val packageName = sbn.packageName ?: ""
         val appName = appLabel(packageName)
 
-        val title = extras.charSequence(Notification.EXTRA_TITLE)?.toString()
-            ?: extras.charSequence(Notification.EXTRA_TITLE_BIG)?.toString()
-        val text = extras.charSequence(Notification.EXTRA_TEXT)?.toString()
-        val subText = extras.charSequence(Notification.EXTRA_SUB_TEXT)?.toString()
-        val bigText = extras.charSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
+            ?: extras.getCharSequence(Notification.EXTRA_TITLE_BIG)?.toString()
+        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+        val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
+        val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
         val template = extras.getString(Notification.EXTRA_TEMPLATE)
 
         val flags = notification.flags
@@ -74,7 +75,7 @@ class NotificationEventFactory(
             subText = subText,
             bigText = bigText,
             category = notification.category,
-            importance = NotificationImportance.from(notification.importance),
+            importance = channelImportance(notification),
             postedAtMs = sbn.postTime,
             isOngoing = isOngoing,
             isGroupSummary = isGroupSummary,
@@ -209,7 +210,7 @@ class NotificationEventFactory(
         Notification.CATEGORY_PROGRESS -> IslandIconKey.DOWNLOAD
         Notification.CATEGORY_EVENT -> IslandIconKey.NOTIFICATION
         Notification.CATEGORY_SYSTEM, Notification.CATEGORY_SERVICE -> IslandIconKey.INFO
-        Notification.CATEGORY_ERROR, Notification.CATEGORY_CRASH -> IslandIconKey.WARNING
+        Notification.CATEGORY_ERROR -> IslandIconKey.WARNING
         Notification.CATEGORY_REMINDER -> IslandIconKey.TIMER
         else -> IslandIconKey.NOTIFICATION
     }
@@ -275,11 +276,40 @@ class NotificationEventFactory(
         }
     }
 
+    /**
+     * Channel importance is the only honest signal for "how loud" a notification is — the framework
+     * exposes no importance field on [Notification] itself. A full-screen intent (an incoming call or
+     * alarm) is always treated as urgent, and an unreadable channel falls back to the legacy priority.
+     */
+    private fun channelImportance(notification: Notification): NotificationImportance {
+        if (notification.fullScreenIntent != null) return NotificationImportance.URGENT
+        val channelId = notification.channelId
+        val manager = runCatching { context.getSystemService(NotificationManager::class.java) }.getOrNull()
+        val channelImportance = if (channelId.isNullOrEmpty()) {
+            null
+        } else {
+            runCatching { manager?.getNotificationChannel(channelId)?.importance }.getOrNull()
+        }
+        return NotificationImportance.from(channelImportance ?: priorityToImportance(notification))
+    }
+
     companion object {
         private const val TAG = "NotificationFactory"
 
+        /**
+         * Pre-channel fallback: the deprecated [Notification.priority] still ranks a notification, and
+         * it is the only thing available when the channel cannot be read.
+         */
+        @Suppress("DEPRECATION")
+        fun priorityToImportance(notification: Notification): Int = when (notification.priority) {
+            Notification.PRIORITY_MAX, Notification.PRIORITY_HIGH -> NotificationManager.IMPORTANCE_HIGH
+            Notification.PRIORITY_DEFAULT -> NotificationManager.IMPORTANCE_DEFAULT
+            Notification.PRIORITY_LOW -> NotificationManager.IMPORTANCE_LOW
+            else -> NotificationManager.IMPORTANCE_MIN
+        }
+
         /** Convenience for callers that only have the framework object. */
         fun importanceOf(notification: Notification): NotificationImportance =
-            NotificationImportance.from(notification.importance)
+            NotificationImportance.from(priorityToImportance(notification))
     }
 }

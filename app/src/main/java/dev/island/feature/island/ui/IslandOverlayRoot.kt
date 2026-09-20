@@ -317,7 +317,7 @@ private fun tickIntervalFor(event: IslandEvent?, hasContent: Boolean): Long {
         is IslandEvent.Download -> if (event.download.completed) 0L else SECOND_TICK_MS
         is IslandEvent.Navigation -> SECOND_TICK_MS
         is IslandEvent.Alarm -> if (event.alarm.isRinging) 0L else MINUTE_TICK_MS
-        is IslandEvent.Charging, is IslandEvent.Battery -> 0L
+        is IslandEvent.Charging, is IslandEvent.Battery, is IslandEvent.Bluetooth -> 0L
         is IslandEvent.Notification ->
             if (event.notification.progressIndeterminate || event.notification.hasProgress) SECOND_TICK_MS else 0L
 

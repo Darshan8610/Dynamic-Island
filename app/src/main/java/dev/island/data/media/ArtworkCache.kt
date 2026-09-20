@@ -77,8 +77,9 @@ object ArtworkReader {
         metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)?.let { return it }
         metadata.getBitmap(MediaMetadata.METADATA_KEY_ART)?.let { return it }
         metadata.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)?.let { return it }
-        val bytes = metadata.getByteArray(MediaMetadata.METADATA_KEY_ALBUM_ART)
-            ?: metadata.getByteArray(MediaMetadata.METADATA_KEY_ART)
+        val bundle = metadata.bundle
+        val bytes: ByteArray? = bundle?.getByteArray(MediaMetadata.METADATA_KEY_ALBUM_ART)
+            ?: bundle?.getByteArray(MediaMetadata.METADATA_KEY_ART)
         if (bytes != null && bytes.isNotEmpty()) {
             return runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
         }

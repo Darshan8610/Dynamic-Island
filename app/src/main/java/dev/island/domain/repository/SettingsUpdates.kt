@@ -84,11 +84,14 @@ suspend fun SettingsRepository.recordSeenApp(packageName: String, appLabel: Stri
         if (seen.containsKey(packageName) && (appLabel == null || seen[packageName] == appLabel)) {
             return@update current
         }
-        current.copy(
-            notifications = current.notifications.copy(
-                seenApps = (seen + (packageName to (appLabel ?: seen[packageName] ?: packageName))).take(MAX_SEEN_APPS),
-            ),
-        )
+        val updated = seen + (packageName to (appLabel ?: seen[packageName] ?: packageName))
+        // Maps have no take(): drop the oldest entries (insertion order) once the cap is reached.
+        val trimmed = if (updated.size > MAX_SEEN_APPS) {
+            updated.entries.drop(updated.size - MAX_SEEN_APPS).associate { it.key to it.value }
+        } else {
+            updated
+        }
+        current.copy(notifications = current.notifications.copy(seenApps = trimmed))
     }
 }
 

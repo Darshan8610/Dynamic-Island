@@ -64,8 +64,9 @@ class IslandWindowManager(
             return true
         }
         val params = buildLayoutParams(bounds)
+        val manager = windowManager ?: return false
         return runCatching {
-            windowManager.addView(view, params)
+            manager.addView(view, params)
             attachedView = view
             currentParams = params
             isAttached = true

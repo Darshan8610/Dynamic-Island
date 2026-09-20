@@ -184,9 +184,9 @@ class BluetoothMonitor(
 
         private object BluetoothClassAudio {
             const val HEADPHONES = android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_HEADPHONES
-            const val EARPIECE = android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_EARPIECE
+            const val EARPIECE = android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_HANDSFREE
             const val WEARABLE_HEADSET_DEVICE =
-                android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_WEARABLE_HEADSET_DEVICE
+                android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_WEARABLE_HEADSET
             const val LOUDSPEAKER = android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_LOUDSPEAKER
             const val PORTABLE_AUDIO = android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_PORTABLE_AUDIO
             const val HIFI_AUDIO = android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_HIFI_AUDIO

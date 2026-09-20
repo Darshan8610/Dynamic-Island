@@ -184,6 +184,9 @@ object IslandStateMachine {
             IslandPhase.TRANSIENT, IslandPhase.PINNED, IslandPhase.EXPANDED, IslandPhase.EXPANDING -> current
 
             IslandPhase.INTERACTING -> current
+
+            // A disabled island never animates in; next() short-circuits before reaching here.
+            IslandPhase.DISABLED -> IslandPhase.DISABLED
         }
     }
 

@@ -119,7 +119,8 @@ object AppGraph {
     lateinit var artworkCache: ArtworkCache
         private set
 
-    lateinit var appIconProvider: AppIconProvider
+    /** Loads source-app icons; exposed to the UI as the [appIconProvider] lambda below. */
+    lateinit var iconProvider: AppIconProvider
         private set
 
     lateinit var cutoutDetector: CutoutDetector
@@ -172,7 +173,7 @@ object AppGraph {
 
     /** Source-app icon for a notification event, or null (the renderer then draws a glyph). */
     val appIconProvider: (String?) -> Drawable? = { packageName ->
-        runCatching { if (initialized) appIconProvider.iconFor(packageName) else null }.getOrNull()
+        runCatching { if (initialized) iconProvider.iconFor(packageName) else null }.getOrNull()
     }
 
     /**
@@ -189,7 +190,7 @@ object AppGraph {
         permissionRepository = AndroidPermissionRepository(appContext, logger)
         permissionLauncher = PermissionLauncher(logger)
         artworkCache = ArtworkCache(logger)
-        appIconProvider = AppIconProvider(appContext)
+        iconProvider = AppIconProvider(appContext)
         cutoutDetector = CutoutDetector(logger)
         displayInfoProvider = DisplayInfoProvider(appContext)
 

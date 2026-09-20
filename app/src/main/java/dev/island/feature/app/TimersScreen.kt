@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -362,7 +361,7 @@ private fun StopwatchSection() {
             } else {
                 SettingsCard {
                     val splits = state?.splits().orEmpty()
-                    itemsIndexed(laps) { index, lap ->
+                    laps.forEachIndexed { index, lap ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -380,7 +379,7 @@ private fun StopwatchSection() {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        RowDivider()
+                        if (index != laps.lastIndex) RowDivider()
                     }
                 }
             }
