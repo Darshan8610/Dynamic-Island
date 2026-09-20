@@ -186,12 +186,12 @@ class IslandEngineTest {
         runCurrent()
         assertTrue(engine.uiState.value.isRendering)
 
-        harness.deviceStateRepository.set(DeviceContext(screenOn = false, screenOff = true))
+        harness.deviceStateRepository.set(DeviceContext(screenOn = false))
         advanceTimeBy(SETTLE_MS)
         runCurrent()
         assertFalse("a screen-off device must not render the island", engine.uiState.value.isRendering)
 
-        harness.deviceStateRepository.set(DeviceContext(screenOn = true, screenOff = false))
+        harness.deviceStateRepository.set(DeviceContext(screenOn = true))
         advanceTimeBy(SETTLE_MS)
         runCurrent()
         assertTrue(engine.uiState.value.hasEvents)
