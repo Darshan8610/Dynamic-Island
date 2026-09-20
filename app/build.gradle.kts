@@ -18,12 +18,12 @@ val keystoreProperties = Properties().apply {
 
 android {
     namespace = "dev.island"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "dev.island"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
 

@@ -32,6 +32,18 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # compileSdk 36 may not be preinstalled on the runner image; AGP can auto-download it, but
+      # doing it explicitly keeps the failure (if any) in one obvious place.
+      - name: Ensure Android SDK platform 36
+        shell: bash
+        run: |
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$SDK" ]; then echo "no ANDROID_HOME; letting AGP resolve the SDK"; exit 0; fi
+          if [ -d "$SDK/platforms/android-36" ]; then echo "platform 36 already installed"; exit 0; fi
+          SDKMANAGER=$(ls "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)
+          if [ -z "$SDKMANAGER" ]; then echo "no sdkmanager; letting AGP auto-download"; exit 0; fi
+          yes | "$SDKMANAGER" --install "platforms;android-36" || echo "install failed; AGP will retry"
+
       - name: Prepare log directory
         shell: bash
         run: mkdir -p ci-logs artifacts
@@ -49,6 +61,13 @@ jobs:
         shell: bash
         if: ${{ always() }}
         run: ./gradlew --no-daemon lintDebug 2>&1 | tee ci-logs/lint.log
+
+      # Instrumented tests need a device, so every push at least proves they still compile; the
+      # `ui-tests` job below actually runs them (manual dispatch, it needs an emulator).
+      - name: Compile instrumented tests
+        shell: bash
+        if: ${{ always() }}
+        run: ./gradlew --no-daemon assembleDebugAndroidTest 2>&1 | tee ci-logs/android-test-compile.log
 
       - name: Collect build outputs
         shell: bash
@@ -113,4 +132,76 @@ jobs:
             git push origin HEAD:"${GITHUB_REF_NAME}" || echo "log push failed"
           else
             echo "no log changes to publish"
+          fi
+
+  # Runs the instrumented suite on a real emulator. Deliberately manual: booting an AVD costs more
+  # than the whole JVM build, and a push should not wait for it. Trigger with:
+  #   gh workflow run build.yml --ref <branch>
+  ui-tests:
+    name: Instrumented UI tests
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Enable KVM for hardware acceleration
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Prepare log directory
+        shell: bash
+        run: mkdir -p ci-logs
+
+      - name: Run instrumented tests on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          ram-size: 4096M
+          disable-animations: true
+          script: ./gradlew --no-daemon connectedDebugAndroidTest 2>&1 | tee ci-logs/ui-tests.log
+
+      - name: Upload test reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: island-ui-test-reports
+          path: |
+            ci-logs/
+            app/build/reports/androidTests/
+          if-no-files-found: warn
+          retention-days: 30
+
+      # Same delivery problem as the build job: the log CDN is unreachable from the sandbox that
+      # drives this repo, so failures publish their logs back to the branch.
+      - name: Publish failure logs
+        if: ${{ failure() }}
+        shell: bash
+        run: |
+          git config user.name "island-ci"
+          git config user.email "ci@island.local"
+          git add -f ci-logs
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: publish UI test logs for ${GITHUB_SHA::7} [skip ci]"
+            git push origin HEAD:"${GITHUB_REF_NAME}" || echo "log push failed"
           fi

@@ -10,7 +10,7 @@ priority queue and a state machine, and are drawn into a `TYPE_APPLICATION_OVERL
 exactly the size of the pill, so the app underneath keeps every touch that is not on the island.
 
 ```
-Kotlin · Jetpack Compose · Material 3 · minSdk 26 · targetSdk 35 · no analytics, no telemetry
+Kotlin · Jetpack Compose · Material 3 · minSdk 26 · compile/targetSdk 36 (Android 16) · no analytics, no telemetry
 ```
 
 ---
@@ -83,20 +83,30 @@ keyPassword=...
 ./gradlew assembleRelease
 ```
 
-Requirements: JDK 17, Android SDK 35. The debug variant uses the application id suffix `.debug`, so
-a debug and a release build can be installed side by side.
+Requirements: JDK 17, Android SDK 36, AGP 8.9.1, Gradle 8.11.1 (the wrapper handles Gradle). The
+debug variant uses the application id suffix `.debug`, so a debug and a release build can be installed
+side by side.
 
-CI (GitHub Actions, `.github/workflows/build.yml`) runs `assembleDebug` → `test` → `lint` on every
-push, and publishes `ci-logs/` plus the APK artifacts when something fails, so a red build is always
-diagnosable from the repository alone.
+CI (GitHub Actions, `.github/workflows/build.yml`) runs `assembleDebug` + `assembleRelease` →
+`testDebugUnitTest` → `lintDebug` → `assembleDebugAndroidTest` on every push; on success it commits
+the built APKs to `dist/`, and on failure it commits `ci-logs/`, so a red build is always diagnosable
+from the repository alone.
 
 ### Targeting Android 16 / API 36
 
-The project compiles against SDK 35 today. Moving to 36 is a two-line change (`compileSdk`/`targetSdk`
-in `app/build.gradle.kts`) plus a toolchain bump: API 36 needs AGP 8.9.1+ and Gradle 8.11.1+. Nothing
-in the source uses deprecated window or notification behaviour that changes at 36 — the overlay uses
-`TYPE_APPLICATION_OVERLAY`, the foreground service declares `specialUse` with a subtype property, and
-edge-to-edge is already the default layout mode.
+The project compiles and targets SDK 36 on AGP 8.9.1 / Gradle 8.11.1 (those three move together —
+API 36 needs AGP 8.9.1+, and AGP 8.9 needs Gradle 8.11.1+). Nothing in the source needed a behaviour
+change for 36, because the three things Android 16 tightens were already the design:
+
+- **Enforced edge-to-edge** — the activity calls `enableEdgeToEdge()` and every screen consumes
+  window insets, so no layout relies on the system bars being opaque.
+- **Overlay window type** — `TYPE_APPLICATION_OVERLAY` with `SYSTEM_ALERT_WINDOW` granted by the user
+  in system settings; nothing uses the removed/hidden window types.
+- **Foreground service types** — the service declares `specialUse` with a
+  `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` explaining the use, and it is started only while Island is on.
+
+Kotlin (2.0.21) and the Compose BOM (2024.12.01) are pinned deliberately: the Compose compiler ships
+with Kotlin, so bumping either is a separate, whole-UI re-verification, not a version string.
 
 ---
 
@@ -237,8 +247,10 @@ against `IslandEvent`, so a new family is picked up automatically.
 ## Testing
 
 ```bash
-./gradlew test        # JVM unit tests
-./gradlew lint        # static analysis (errors fail the build)
+./gradlew test                        # JVM unit tests (76 tests, milliseconds)
+./gradlew lint                        # static analysis (errors fail the build)
+./gradlew assembleDebugAndroidTest    # compile the instrumented suite
+./gradlew connectedDebugAndroidTest   # run it on a device/emulator (adb devices)
 ```
 
 Unit tests cover the parts where a bug is invisible until it happens on someone else's phone:
@@ -263,9 +275,25 @@ Unit tests cover the parts where a bug is invisible until it happens on someone 
 - **`IslandRendererRegistryTest`** — every event family resolves to a renderer, dedicated renderers
   beat the generic fallback.
 
-UI-level behaviour that needs a device (overlay attachment, window flags, real `MediaSession`
-interaction) is exercised manually through **Demo mode** and the **Diagnostics** screen, which report
-the live state of every capability.
+Instrumented tests (`app/src/androidTest`) cover the half a JVM cannot:
+
+- **`MainActivitySmokeTest`** — the app launches on a real device: `IslandApplication` builds the
+  object graph, DataStore reads settings for the first time, the permission repository queries the
+  platform, Compose inflates in an Activity. It also asserts the engine publishes state and survives
+  a device with no overlay permission (disabled, not crashed).
+- **`IslandGeometryOnDeviceTest`** — the same `IslandMetrics` rules the unit tests pin with synthetic
+  inputs, checked against the *actual* display: does the derived pill fit this screen at this density,
+  with this font scale, in this orientation, at every user size scale from 0.7 to 1.5? This is the test
+  that proves no resolution is ever assumed.
+- **`IslandRendererInstrumentedTest`** — renders the real island through `IslandPreview` and asserts
+  content reaches the semantics tree: media title + artist (expanded and collapsed), notification
+  sender, timer label, grouped-notification count. This is what catches "it compiles but draws nothing".
+
+CI compiles the instrumented suite on every push so it cannot rot, and runs it on an emulator through
+the manual `ui-tests` job (`gh workflow run build.yml --ref <branch>`) — booting an AVD costs more than
+the whole JVM build, so a push does not wait for it. Overlay attachment, real window flags and live
+`MediaSession` interaction are still exercised by hand through **Demo mode** and the **Diagnostics**
+screen, which report the live state of every capability.
 
 ---
 

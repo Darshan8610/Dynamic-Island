@@ -342,14 +342,27 @@ Island is built to fail one feature at a time, never as a whole:
   formatting, notification grouping, renderer resolution. These are the invariants users feel and
   they run in milliseconds.
 - **Lint** configured to fail on errors, with a `lint.xml` that documents intentional suppressions.
-- **CI** (`.github/workflows/build.yml`) runs assemble → test → lint on every push and publishes
-  `ci-logs/` plus artifacts on failure, so the build is reproducible from the repository alone.
+- **CI** (`.github/workflows/build.yml`) runs assemble (debug + release) → unit tests → lint →
+  instrumented-test compile on every push; a green run commits the APKs to `dist/`, a red run commits
+  `ci-logs/`, so every build is reproducible and diagnosable from the repository alone. A second,
+  manual job runs the instrumented suite on an API 36 emulator.
 - **Manual, in-app**: Demo mode drives real events through the real pipeline (with inert controls),
   and Diagnostics/Event log/Perf expose live capability state, the redacted event log and frame
   timing. This is deliberately used for the parts that cannot be unit-tested honestly — overlay
   attachment, window flags, real `MediaSession` behaviour, OEM quirks.
-- **Instrumented UI tests** are the natural next step for gesture thresholds and overlay attachment;
-  they are not included because they require a device/emulator and would give false confidence in CI.
+- **Instrumented tests** (`app/src/androidTest`) for the parts a JVM cannot answer: app launch and
+  object-graph construction on a real device (`MainActivitySmokeTest`), geometry checked against the
+  actual display at every user scale and orientation (`IslandGeometryOnDeviceTest`), and the real
+  renderers driven through `IslandPreview` with content asserted in the semantics tree
+  (`IslandRendererInstrumentedTest`). CI compiles them on every push (`assembleDebugAndroidTest`) and
+  runs them on an emulator through the manual `ui-tests` job, because booting an AVD costs more than
+  the entire JVM build and a push should not wait for it.
+- **Still manual by choice**: overlay attachment and window flags (they need `SYSTEM_ALERT_WINDOW`,
+  which no emulator grants without user action), live `MediaSession` interaction (needs a real player
+  holding audio focus) and OEM power-management behaviour. Demo mode and the Diagnostics screen exist
+  to make those checks fast and honest instead of anecdotal.
+- **Next**: gesture-threshold tests (drag/swipe velocity against `ViewConfiguration`), which need the
+  overlay permission and therefore a granted-permission emulator snapshot rather than a plain AVD.
 
 ---
 
