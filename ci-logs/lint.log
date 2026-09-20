@@ -4,88 +4,29 @@ Calculating task graph as no cached configuration is available for tasks: lintDe
 > Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
 > Task :app:preBuild UP-TO-DATE
 > Task :app:preDebugBuild UP-TO-DATE
-> Task :app:generateDebugResValues UP-TO-DATE
-> Task :app:generateDebugBuildConfig UP-TO-DATE
 > Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
 > Task :app:extractDeepLinksDebug UP-TO-DATE
 > Task :app:generateDebugResources UP-TO-DATE
-> Task :app:checkDebugAarMetadata UP-TO-DATE
 > Task :app:mapDebugSourceSetPaths UP-TO-DATE
-> Task :app:javaPreCompileDebug UP-TO-DATE
-> Task :app:preDebugAndroidTestBuild SKIPPED
-> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
 > Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:preDebugAndroidTestBuild SKIPPED
+> Task :app:javaPreCompileDebug UP-TO-DATE
 > Task :app:extractProguardFiles UP-TO-DATE
 > Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
 > Task :app:parseDebugLocalResources UP-TO-DATE
-> Task :app:processDebugMainManifest UP-TO-DATE
 > Task :app:generateDebugAndroidTestResValues FROM-CACHE
+> Task :app:processDebugMainManifest UP-TO-DATE
 > Task :app:processDebugManifest UP-TO-DATE
 > Task :app:processDebugManifestForPackage UP-TO-DATE
 > Task :app:processDebugResources UP-TO-DATE
 
 > Task :app:compileDebugKotlin FAILED
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/core/AppGraph.kt:122:18 Conflicting declarations:
-val appIconProvider: (String?) -> Drawable?
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/core/AppGraph.kt:174:9 Conflicting declarations:
-var appIconProvider: AppIconProvider
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/core/AppGraph.kt:175:40 Overload resolution ambiguity between candidates:
-var appIconProvider: AppIconProvider
-val appIconProvider: (String?) -> Drawable?
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/core/AppGraph.kt:175:56 Unresolved reference 'iconFor'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/core/AppGraph.kt:192:9 Overload resolution ambiguity between candidates:
-var appIconProvider: AppIconProvider
-val appIconProvider: (String?) -> Drawable?
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/core/notifications/IslandNotifications.kt:55:13 'val' cannot be reassigned.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/core/notifications/IslandNotifications.kt:55:21 Assignment type mismatch: actual type is 'kotlin.String', but 'android.app.NotificationChannelGroup' was expected.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/core/notifications/IslandNotifications.kt:65:13 'val' cannot be reassigned.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/core/notifications/IslandNotifications.kt:65:21 Assignment type mismatch: actual type is 'kotlin.String', but 'android.app.NotificationChannelGroup' was expected.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/core/notifications/IslandNotifications.kt:76:13 'val' cannot be reassigned.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/core/notifications/IslandNotifications.kt:76:21 Assignment type mismatch: actual type is 'kotlin.String', but 'android.app.NotificationChannelGroup' was expected.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/device/BluetoothMonitor.kt:187:74 Unresolved reference 'AUDIO_VIDEO_EARPIECE'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/device/BluetoothMonitor.kt:189:57 Unresolved reference 'AUDIO_VIDEO_WEARABLE_HEADSET_DEVICE'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/device/CallStateMonitor.kt:45:46 Unresolved reference 'TELECOM_MANAGER_SERVICE'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/media/ArtworkCache.kt:80:30 Unresolved reference 'getByteArray'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/media/ArtworkCache.kt:81:25 Unresolved reference 'getByteArray'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/media/ArtworkCache.kt:82:36 Unresolved reference 'isNotEmpty'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/media/ArtworkCache.kt:83:64 Argument type mismatch: actual type is 'kotlin.Any', but 'kotlin.ByteArray!' was expected.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/media/ArtworkCache.kt:83:80 Unresolved reference 'size'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/media/MediaSessionRepositoryImpl.kt:78:9 'onSessionReleased' overrides nothing.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/media/MediaSessionRepositoryImpl.kt:79:9 'onAudioInfoChanged' overrides nothing.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/notifications/NotificationEventFactory.kt:48:28 Unresolved reference 'charSequence'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/notifications/NotificationEventFactory.kt:49:23 Unresolved reference 'charSequence'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/notifications/NotificationEventFactory.kt:50:27 Unresolved reference 'charSequence'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/notifications/NotificationEventFactory.kt:51:30 Unresolved reference 'charSequence'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/notifications/NotificationEventFactory.kt:52:30 Unresolved reference 'charSequence'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/notifications/NotificationEventFactory.kt:77:67 Unresolved reference 'importance'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/notifications/NotificationEventFactory.kt:212:51 Unresolved reference 'CATEGORY_CRASH'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/notifications/NotificationEventFactory.kt:283:54 Unresolved reference 'importance'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/domain/engine/IslandStateMachine.kt:171:16 'when' expression must be exhaustive. Add the 'DISABLED' branch or an 'else' branch.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/domain/repository/SettingsUpdates.kt:89:101 Unresolved reference 'take'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/feature/app/CustomizeScreen.kt:109:56 Overload resolution ambiguity between candidates:
-var appIconProvider: AppIconProvider
-val appIconProvider: (String?) -> Drawable?
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/feature/app/DashboardScreen.kt:153:56 Overload resolution ambiguity between candidates:
-var appIconProvider: AppIconProvider
-val appIconProvider: (String?) -> Drawable?
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/feature/app/DemoScreen.kt:100:56 Overload resolution ambiguity between candidates:
-var appIconProvider: AppIconProvider
-val appIconProvider: (String?) -> Drawable?
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/feature/app/DiagnosticsScreen.kt:338:96 Unresolved reference 'color'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/feature/app/TimersScreen.kt:365:21 'fun <T> LazyListScope.itemsIndexed(items: List<T>, noinline key: ((@ParameterName(...) Int, @ParameterName(...) T) -> Any)? = ..., crossinline contentType: (@ParameterName(...) Int, @ParameterName(...) T) -> Any? = ..., crossinline itemContent: @Composable() ComposableFunction3<LazyItemScope, @ParameterName(...) Int, @ParameterName(...) T, Unit>): Unit' cannot be called in this context with an implicit receiver. Use an explicit receiver if necessary.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/feature/app/TimersScreen.kt:366:25 @Composable invocations can only happen from the context of a @Composable function
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/feature/app/TimersScreen.kt:383:25 @Composable invocations can only happen from the context of a @Composable function
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/feature/island/ui/IslandOverlayRoot.kt:304:12 'when' expression must be exhaustive. Add the 'is Bluetooth' branch or an 'else' branch.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/service/IslandService.kt:19:27 Unresolved reference 'setViewTreeSavedStateRegistryOwner'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/service/IslandService.kt:227:13 Unresolved reference 'setViewTreeSavedStateRegistryOwner'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/service/IslandService.kt:423:44 Overload resolution ambiguity between candidates:
-var appIconProvider: AppIconProvider
-val appIconProvider: (String?) -> Drawable?
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/service/IslandService.kt:476:13 Cannot infer type for this parameter. Please specify it explicitly.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/service/IslandService.kt:476:25 Cannot infer type for this parameter. Please specify it explicitly.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/service/IslandService.kt:476:41 Unresolved reference 'startForegroundService'.
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/service/IslandWindowManager.kt:68:26 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'android.view.WindowManager?'.
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_4-1789886069330.json
+e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/media/ArtworkCache.kt:80:31 Unresolved reference 'bundle'.
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_4-1789886694285.json
 
 FAILURE: Build failed with an exception.
 
@@ -100,6 +41,6 @@ Execution failed for task ':app:compileDebugKotlin'.
 > Run with --scan to get full insights.
 > Get more help at https://help.gradle.org.
 
-BUILD FAILED in 32s
+BUILD FAILED in 31s
 18 actionable tasks: 1 executed, 1 from cache, 16 up-to-date
 Configuration cache entry stored.
