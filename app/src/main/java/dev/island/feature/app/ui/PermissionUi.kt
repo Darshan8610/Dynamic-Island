@@ -1,5 +1,6 @@
 package dev.island.feature.app.ui
 
+import android.annotation.SuppressLint
 import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -26,7 +27,15 @@ import dev.island.domain.model.PermissionStatus
  * it belongs to — the island itself keeps working.
  */
 
-/** Runtime permission string for keys that have one; null for special-access keys. */
+/**
+ * Runtime permission string for keys that have one; null for special-access keys.
+ *
+ * POST_NOTIFICATIONS (33) and BLUETOOTH_CONNECT (31) are newer than minSdk 26, but they are
+ * compile-time String constants: the compiler inlines them, so referencing them cannot fail on an
+ * older device. Whether the permission *applies* on this device is decided by
+ * [permissionAppliesOnThisDevice] and reported through PermissionStatus, never by this mapping.
+ */
+@SuppressLint("InlinedApi")
 fun runtimePermissionFor(key: PermissionKey): String? = when (key) {
     PermissionKey.POST_NOTIFICATIONS -> android.Manifest.permission.POST_NOTIFICATIONS
     PermissionKey.BLUETOOTH_CONNECT -> android.Manifest.permission.BLUETOOTH_CONNECT

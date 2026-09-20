@@ -41,12 +41,9 @@ class CallStateMonitor(
 
     private val telephonyManager =
         context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+    // TelecomManager exists since API 21 and minSdk is 26: no version gate, just a null-safe cast.
     private val telecomManager =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            context.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
-        } else {
-            null
-        }
+        context.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
 
     private val _call = MutableStateFlow(CallInfo())
@@ -152,9 +149,7 @@ class CallStateMonitor(
 
     // region controls (only exposed when Android permits them)
 
-    fun canControlCalls(): Boolean =
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            hasPermission(android.Manifest.permission.ANSWER_PHONE_CALLS)
+    fun canControlCalls(): Boolean = hasPermission(android.Manifest.permission.ANSWER_PHONE_CALLS)
 
     fun canMute(): Boolean = hasPermission(android.Manifest.permission.MODIFY_AUDIO_SETTINGS)
 

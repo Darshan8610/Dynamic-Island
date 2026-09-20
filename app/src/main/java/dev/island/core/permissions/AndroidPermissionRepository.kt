@@ -120,9 +120,8 @@ class AndroidPermissionRepository(
 
     fun hasReadPhoneState(): Boolean = hasPermission(android.Manifest.permission.READ_PHONE_STATE)
 
-    fun hasAnswerPhoneCalls(): Boolean =
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            hasPermission(android.Manifest.permission.ANSWER_PHONE_CALLS)
+    // ANSWER_PHONE_CALLS exists since API 24 and minSdk is 26, so there is no version to check.
+    fun hasAnswerPhoneCalls(): Boolean = hasPermission(android.Manifest.permission.ANSWER_PHONE_CALLS)
 
     fun canScheduleExactAlarms(): Boolean = runCatching {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {

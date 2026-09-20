@@ -39,7 +39,7 @@ object IslandNotifications {
 
     fun ensureChannels(context: Context) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        // Notification channels are mandatory from API 26 and minSdk is 26, so there is no legacy path.
 
         val group = NotificationChannelGroup(GROUP_ID, context.getString(R.string.notification_group_name))
         runCatching { manager.createNotificationChannelGroup(group) }

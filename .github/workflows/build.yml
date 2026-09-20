@@ -143,6 +143,9 @@ jobs:
   ui-tests:
     name: Instrumented UI tests
     if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[ui]') }}
+    # Runs after the build job: no point booting an emulator for code that does not compile, and
+    # serialising the two jobs means only one of them ever pushes to the branch at a time.
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -151,7 +154,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          # Full history: the build job pushed the APKs while this job was queued, and the summary
+          # step has to rebase onto that commit before it can push.
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -195,8 +200,36 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      # Same delivery problem as the build job: the log CDN is unreachable from the sandbox that
-      # drives this repo, so failures publish their logs back to the branch.
+      # Which instrumented tests actually ran is worth keeping: the log CDN is unreachable from the
+      # sandbox that drives this repo, so the summary is committed back to the branch instead.
+      - name: Publish test summary
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          mkdir -p ci-logs
+          {
+            echo "connectedDebugAndroidTest — ${GITHUB_SHA}"
+            echo
+            found=0
+            for f in $(find app/build/outputs/androidTest-results -name '*.xml' 2>/dev/null); do
+              found=1
+              sed -n 's/.*testsuite name="\([^"]*\)" tests="\([0-9]*\)" .*failures="\([0-9]*\)" errors="\([0-9]*\)".*/\1  tests=\2 failures=\3 errors=\4/p' "$f"
+              sed -n 's/.*testcase name="\([^"]*\)" classname="\([^"]*\)".*/  - \2 > \1/p' "$f"
+            done
+            [ "$found" = "1" ] || echo "no test result XML found (job did not reach the test run)"
+          } > ci-logs/ui-tests-summary.txt
+          cat ci-logs/ui-tests-summary.txt
+
+          git config user.name "island-ci"
+          git config user.email "ci@island.local"
+          git pull --rebase origin "${GITHUB_REF_NAME}" >/dev/null 2>&1 || echo "pull failed; pushing anyway"
+          git add -f ci-logs/ui-tests-summary.txt
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: instrumented test summary for ${GITHUB_SHA::7} [skip ci]"
+            git push origin HEAD:"${GITHUB_REF_NAME}" || echo "summary push failed"
+          fi
+
+      # Same delivery problem as the build job: failures publish their logs back to the branch.
       - name: Publish failure logs
         if: ${{ failure() }}
         shell: bash
