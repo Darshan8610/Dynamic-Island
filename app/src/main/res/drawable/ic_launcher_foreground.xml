@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Island mark: a light pill with a dark "I" glyph, inside the adaptive-icon safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#F2F5F9"
+        android:pathData="M41,47 L67,47 A7,7 0 0 1 67,61 L41,61 A7,7 0 0 1 41,47 Z" />
+    <path
+        android:fillColor="#0B0C0E"
+        android:pathData="M53,50 h2 a1.6,1.6 0 0 1 1.6,1.6 v4.8 a1.6,1.6 0 0 1 -1.6,1.6 h-2 a1.6,1.6 0 0 1 -1.6,-1.6 v-4.8 a1.6,1.6 0 0 1 1.6,-1.6 z" />
+</vector>

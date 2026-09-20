@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon (Material You) variant: single-colour silhouette of the Island mark, "I" cut out. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M41,47 L67,47 A7,7 0 0 1 67,61 L41,61 A7,7 0 0 1 41,47 Z M52.4,49.8 h3.2 v8.4 h-3.2 z" />
+</vector>

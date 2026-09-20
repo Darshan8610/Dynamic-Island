@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+      PERMISSION MATRIX (see README.md → "Permissions" for the user-facing explanation)
+
+      SYSTEM_ALERT_WINDOW      -> the island overlay window (TYPE_APPLICATION_OVERLAY).
+                                  Granted by the user in system settings; never granted silently.
+      POST_NOTIFICATIONS       -> Island's own notifications (timers, service, permission recovery).
+      FOREGROUND_SERVICE       -> keeps the overlay + event monitors alive while Island is enabled.
+      FOREGROUND_SERVICE_SPECIAL_USE
+                               -> the overlay pill is user-visible work that fits no other FGS type.
+                                  Declared with PROPERTY_SPECIAL_USE_FGS_SUBTYPE below.
+      RECEIVE_BOOT_COMPLETED   -> restores user preferences after reboot (never auto-starts an FGS).
+      BLUETOOTH_CONNECT        -> names of already-connected audio/wearable devices. No scanning.
+      READ_PHONE_STATE         -> incoming/ongoing call state only. Optional; requested only when the
+                                  user turns on the call island. No call log, no audio, no recording.
+      SCHEDULE_EXACT_ALARM     -> timer/stopwatch completion while the screen is off. Falls back to
+                                  inexact scheduling when the user has not granted it.
+      VIBRATE                  -> optional haptic feedback for timer completion.
+      BIND_NOTIFICATION_LISTENER_SERVICE
+                               -> held by the notification listener service; the user explicitly
+                                  enables it in system settings.
+
+      Deliberately NOT requested: location, camera, microphone, contacts, call log, SMS, storage,
+      QUERY_ALL_PACKAGES, accessibility services, media projection.
+    -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <uses-feature
+        android:name="android.hardware.bluetooth"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.telephony"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+
+    <!-- Needed to open the app that produced an island event. No QUERY_ALL_PACKAGES. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".core.IslandApplication"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:hardwareAccelerated="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Island"
+        android:enableOnBackInvokedCallback="true"
+        tools:targetApi="34">
+
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density|fontScale"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.Island"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          Single foreground service. It owns:
+            * the overlay window (only when Island is enabled and the overlay permission is granted),
+            * the event dispatcher (media session, battery, Bluetooth, call state, alarms, timers).
+          It is started only after the user enables Island, and stopped when they disable it.
+        -->
+        <service
+            android:name=".service.IslandService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Draws and animates a user-visible Dynamic-Island-style overlay pill above other apps and monitors the device events the user opted in to (media session, battery, Bluetooth audio, call state, alarms, timers)." />
+        </service>
+
+        <!-- Notification monitoring. Enabled by the user in system settings; never silent. -->
+        <service
+            android:name=".data.notifications.IslandNotificationListener"
+            android:exported="true"
+            android:label="@string/notification_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- Restores preferences after reboot / app update. Never starts a foreground service. -->
+        <receiver
+            android:name=".core.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+
+</manifest>

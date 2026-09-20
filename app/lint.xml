@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!--
+      Island is a system-layer app: several checks are intentionally relaxed with a reason,
+      everything else stays at default severity.
+    -->
+
+    <!-- Overlay windows are positioned from live insets, not from these legacy attributes. -->
+    <issue id="UnusedAttribute" severity="warning" />
+
+    <!-- Compose UI is dark-first; the platform theme is only a launch backdrop. -->
+    <issue id="AppCompatResource" severity="ignore" />
+
+    <!-- We deliberately support API 26 with runtime guards instead of raising minSdk. -->
+    <issue id="NewApi" severity="error" />
+
+    <!-- Icon-only strings for TalkBack come from string resources; dynamic event text is data. -->
+    <issue id="ContentDescription" severity="warning" />
+
+    <!-- Notification listener + overlay are documented in-app before being requested. -->
+    <issue id="NotificationPermission" severity="warning" />
+
+    <!-- Foreground service start from a receiver is guarded by Android version checks. -->
+    <issue id="ForegroundServiceType" severity="error" />
+
+    <issue id="MissingTranslation" severity="ignore" />
+    <issue id="ObsoleteLintCustomCheck" severity="ignore" />
+</lint>

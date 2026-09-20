@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launch backdrop only. All in-app color comes from the Compose design system. -->
+    <color name="island_background">#FF000000</color>
+    <color name="island_background_dark_gray">#FF141518</color>
+    <color name="island_accent">#FF7CC4FF</color>
+    <color name="ic_launcher_background">#FF0B0C0E</color>
+</resources>
