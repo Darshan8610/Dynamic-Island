@@ -4,36 +4,74 @@ Calculating task graph as no cached configuration is available for tasks: lintDe
 > Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
 > Task :app:preBuild UP-TO-DATE
 > Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
 > Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
 > Task :app:generateDebugBuildConfig UP-TO-DATE
-> Task :app:generateDebugResValues UP-TO-DATE
 > Task :app:extractDeepLinksDebug UP-TO-DATE
 > Task :app:generateDebugResources UP-TO-DATE
-> Task :app:mapDebugSourceSetPaths UP-TO-DATE
 > Task :app:checkDebugAarMetadata UP-TO-DATE
-> Task :app:mergeDebugResources UP-TO-DATE
-> Task :app:preDebugAndroidTestBuild SKIPPED
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
 > Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :app:preDebugAndroidTestBuild SKIPPED
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
 > Task :app:extractProguardFiles UP-TO-DATE
 > Task :app:preDebugUnitTestBuild UP-TO-DATE
-> Task :app:packageDebugResources UP-TO-DATE
 > Task :app:parseDebugLocalResources UP-TO-DATE
-> Task :app:generateDebugAndroidTestResValues FROM-CACHE
 > Task :app:processDebugMainManifest UP-TO-DATE
 > Task :app:processDebugManifest UP-TO-DATE
 > Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:generateDebugAndroidTestResValues FROM-CACHE
 > Task :app:processDebugResources UP-TO-DATE
+> Task :app:compileDebugKotlin UP-TO-DATE
+> Task :app:compileDebugJavaWithJavac UP-TO-DATE
+> Task :app:bundleDebugClassesToCompileJar UP-TO-DATE
+> Task :app:generateDebugLintReportModel
+> Task :app:generateDebugAndroidTestLintModel
+> Task :app:generateDebugUnitTestLintModel
+> Task :app:lintAnalyzeDebugAndroidTest
+> Task :app:lintAnalyzeDebugUnitTest
+> Task :app:lintAnalyzeDebug
 
-> Task :app:compileDebugKotlin FAILED
-e: file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/media/ArtworkCache.kt:80:31 Unresolved reference 'bundle'.
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_4-1789886694285.json
+> Task :app:lintReportDebug
+Wrote HTML report to file:///home/runner/work/Dynamic-Island/Dynamic-Island/app/build/reports/lint-results-debug.html
+
+> Task :app:lintDebug FAILED
+Lint found 21 errors, 146 warnings. First failure:
+
+/home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/device/BluetoothMonitor.kt:118: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
+            val bluetoothClass = device.bluetoothClass
+                                 ~~~~~~~~~~~~~~~~~~~~~
+
+The full lint text report is located at:
+  /home/runner/work/Dynamic-Island/Dynamic-Island/app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_4-1789887423331.json
 
 FAILURE: Build failed with an exception.
 
 * What went wrong:
-Execution failed for task ':app:compileDebugKotlin'.
-> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
-   > Compilation error. See log for more details
+Execution failed for task ':app:lintDebug'.
+> Lint found errors in the project; aborting build.
+  
+  Fix the issues identified by lint, or create a baseline to see only new errors.
+  To create a baseline, run `gradlew updateLintBaseline` after adding the following to the module's build.gradle file:
+  ```
+  android {
+      lint {
+          baseline = file("lint-baseline.xml")
+      }
+  }
+  ```
+  For more details, see https://developer.android.com/studio/write/lint#snapshot
+  
+  Lint found 21 errors, 146 warnings. First failure:
+  
+  /home/runner/work/Dynamic-Island/Dynamic-Island/app/src/main/java/dev/island/data/device/BluetoothMonitor.kt:118: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
+              val bluetoothClass = device.bluetoothClass
+                                   ~~~~~~~~~~~~~~~~~~~~~
+  
+  The full lint text report is located at:
+    /home/runner/work/Dynamic-Island/Dynamic-Island/app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt
 
 * Try:
 > Run with --stacktrace option to get the stack trace.
@@ -41,6 +79,6 @@ Execution failed for task ':app:compileDebugKotlin'.
 > Run with --scan to get full insights.
 > Get more help at https://help.gradle.org.
 
-BUILD FAILED in 31s
-18 actionable tasks: 1 executed, 1 from cache, 16 up-to-date
+BUILD FAILED in 58s
+28 actionable tasks: 8 executed, 1 from cache, 19 up-to-date
 Configuration cache entry stored.
