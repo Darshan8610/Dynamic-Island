@@ -110,6 +110,7 @@ enum class ActionLabelKey {
     ANSWER,
     END,
     MUTE,
+    UNMUTE,
     PAUSE_TIMER,
     RESUME,
     STOP,

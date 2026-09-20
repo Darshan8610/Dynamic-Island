@@ -73,6 +73,12 @@ data class IslandUiState(
 
     val hasEvents: Boolean get() = events.isNotEmpty()
 
+    /**
+     * Alias used by the UI and service layers: everything currently on the stack, oldest first.
+     * Same list as [events], named for the way it is read at the call site.
+     */
+    val activeEvents: List<IslandEvent> get() = events
+
     val isRendering: Boolean
         get() = enabled && disabledReason == null && phase != IslandPhase.IDLE && hasEvents
 

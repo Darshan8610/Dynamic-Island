@@ -16,6 +16,9 @@
       BLUETOOTH_CONNECT        -> names of already-connected audio/wearable devices. No scanning.
       READ_PHONE_STATE         -> incoming/ongoing call state only. Optional; requested only when the
                                   user turns on the call island. No call log, no audio, no recording.
+      ANSWER_PHONE_CALLS       -> the island's Answer/End buttons. Optional; requested only when the
+                                  user turns on "Call controls". Without it those buttons are not shown.
+      MODIFY_AUDIO_SETTINGS    -> mute/unmute the microphone during a call from the island.
       SCHEDULE_EXACT_ALARM     -> timer/stopwatch completion while the screen is off. Falls back to
                                   inexact scheduling when the user has not granted it.
       VIBRATE                  -> optional haptic feedback for timer completion.
@@ -33,6 +36,8 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
@@ -51,6 +56,10 @@
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <!-- Opening the system clock from an alarm island event. -->
+        <intent>
+            <action android:name="android.intent.action.SHOW_ALARMS" />
         </intent>
     </queries>
 
@@ -107,6 +116,20 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- Timer notification buttons and the AlarmManager completion alarm (cold-process safe). -->
+        <receiver
+            android:name=".service.TimerActionReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="dev.island.action.TIMER_ALARM" />
+                <action android:name="dev.island.action.TOGGLE_TIMER" />
+                <action android:name="dev.island.action.STOP_TIMER" />
+                <action android:name="dev.island.action.DISMISS_TIMER" />
+                <action android:name="dev.island.action.RESTART_TIMER" />
+            </intent-filter>
+        </receiver>
 
         <!-- Restores preferences after reboot / app update. Never starts a foreground service. -->
         <receiver

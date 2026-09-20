@@ -84,6 +84,7 @@ internal object Keys {
     val SHOW_ONGOING = booleanPreferencesKey("notifications_show_ongoing")
     val EXPAND_ON_HIGH = booleanPreferencesKey("notifications_expand_on_high")
     val APP_RULES = stringPreferencesKey("notifications_app_rules")
+    val SEEN_APPS = stringPreferencesKey("notifications_seen_apps")
 
     val MEDIA_ENABLED = booleanPreferencesKey("media_enabled")
     val MEDIA_ALBUM_ART = booleanPreferencesKey("media_album_art")
@@ -224,6 +225,7 @@ class DataStoreSettingsRepository(
             showOngoingNotifications = this[Keys.SHOW_ONGOING] ?: defaults.notifications.showOngoingNotifications,
             expandOnHighImportance = this[Keys.EXPAND_ON_HIGH] ?: defaults.notifications.expandOnHighImportance,
             appRules = decodeAppRules(this[Keys.APP_RULES]),
+            seenApps = decodeSeenApps(this[Keys.SEEN_APPS]),
         ),
         media = MediaSettings(
             enabled = this[Keys.MEDIA_ENABLED] ?: defaults.media.enabled,
@@ -322,6 +324,7 @@ class DataStoreSettingsRepository(
         this[Keys.SHOW_ONGOING] = s.notifications.showOngoingNotifications
         this[Keys.EXPAND_ON_HIGH] = s.notifications.expandOnHighImportance
         this[Keys.APP_RULES] = encodeAppRules(s.notifications.appRules)
+        this[Keys.SEEN_APPS] = encodeSeenApps(s.notifications.seenApps)
 
         this[Keys.MEDIA_ENABLED] = s.media.enabled
         this[Keys.MEDIA_ALBUM_ART] = s.media.showAlbumArt
@@ -420,6 +423,28 @@ class DataStoreSettingsRepository(
             }
         }.getOrElse {
             logger.w(TAG, "app rules unreadable, ignoring", it)
+            emptyMap()
+        }
+    }
+
+    private fun encodeSeenApps(apps: Map<String, String>): String {
+        val obj = JSONObject()
+        apps.forEach { (pkg, label) -> obj.put(pkg, label) }
+        return obj.toString()
+    }
+
+    private fun decodeSeenApps(raw: String?): Map<String, String> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        return runCatching {
+            val obj = JSONObject(raw)
+            buildMap {
+                obj.keys().forEach { key ->
+                    val label = obj.optString(key)
+                    if (key.isNotBlank()) put(key, label)
+                }
+            }
+        }.getOrElse {
+            logger.w(TAG, "seen apps unreadable, ignoring", it)
             emptyMap()
         }
     }

@@ -45,6 +45,7 @@ interface TimerRepository {
     val stopwatch: Flow<StopwatchInfo?>
     fun start()
     suspend fun createTimer(durationMs: Long, label: String?): String
+    suspend fun toggleTimer(timerId: String)
     suspend fun pauseTimer(timerId: String)
     suspend fun resumeTimer(timerId: String)
     suspend fun stopTimer(timerId: String)

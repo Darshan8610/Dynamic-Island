@@ -72,6 +72,12 @@ class AndroidPermissionRepository(
             affectsFeature = IslandFeature.CALLS,
         ),
         PermissionStatus(
+            key = PermissionKey.ANSWER_PHONE_CALLS,
+            granted = hasAnswerPhoneCalls(),
+            required = false,
+            affectsFeature = IslandFeature.CALLS,
+        ),
+        PermissionStatus(
             key = PermissionKey.EXACT_ALARM,
             granted = canScheduleExactAlarms(),
             required = false,
@@ -113,6 +119,10 @@ class AndroidPermissionRepository(
             hasPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
 
     fun hasReadPhoneState(): Boolean = hasPermission(android.Manifest.permission.READ_PHONE_STATE)
+
+    fun hasAnswerPhoneCalls(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            hasPermission(android.Manifest.permission.ANSWER_PHONE_CALLS)
 
     fun canScheduleExactAlarms(): Boolean = runCatching {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {

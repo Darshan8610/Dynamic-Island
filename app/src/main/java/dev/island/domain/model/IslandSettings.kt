@@ -188,6 +188,11 @@ data class NotificationSettings(
     val showOngoingNotifications: Boolean = false,
     val expandOnHighImportance: Boolean = true,
     val appRules: Map<String, AppNotificationRule> = emptyMap(),
+    /**
+     * Apps that have posted a notification while Island was running: package name → label.
+     * Island never enumerates installed apps in advance (no QUERY_ALL_PACKAGES).
+     */
+    val seenApps: Map<String, String> = emptyMap(),
 ) {
     fun modeFor(packageName: String): AppNotificationMode =
         appRules[packageName]?.mode ?: AppNotificationMode.ALWAYS

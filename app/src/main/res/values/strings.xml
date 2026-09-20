@@ -1,0 +1,548 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App identity -->
+    <string name="app_name">Island</string>
+    <string name="notification_listener_label">Island notification access</string>
+    <string name="app_tagline">A smarter layer for the things happening on your phone.</string>
+
+    <!-- Notification channels -->
+    <string name="notification_group_name">Island</string>
+    <string name="channel_service_name">Island service</string>
+    <string name="channel_service_description">Keeps the island running while it is enabled.</string>
+    <string name="channel_timers_name">Timers</string>
+    <string name="channel_timers_description">Ongoing timer and stopwatch progress.</string>
+    <string name="channel_alerts_name">Alerts</string>
+    <string name="channel_alerts_description">Timer completion and permission recovery prompts.</string>
+
+    <!-- Foreground service -->
+    <string name="service_notification_title">Island is active</string>
+    <string name="service_notification_idle">Watching for events</string>
+    <string name="service_notification_events">%1$d active event</string>
+    <string name="service_action_turn_off">Turn off</string>
+    <string name="service_started_log">Island service started</string>
+
+    <!-- Generic actions -->
+    <string name="action_play">Play</string>
+    <string name="action_pause">Pause</string>
+    <string name="action_resume">Resume</string>
+    <string name="action_stop">Stop</string>
+    <string name="action_reset">Reset</string>
+    <string name="action_next">Next</string>
+    <string name="action_previous">Previous</string>
+    <string name="action_dismiss">Dismiss</string>
+    <string name="action_open">Open</string>
+    <string name="action_answer">Answer</string>
+    <string name="action_end">End</string>
+    <string name="action_mute">Mute</string>
+    <string name="action_unmute">Unmute</string>
+    <string name="action_lap">Lap</string>
+    <string name="action_snooze">Snooze</string>
+    <string name="action_restart">Restart</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_save">Save</string>
+    <string name="action_grant">Grant permission</string>
+    <string name="action_test_overlay">Test island</string>
+    <string name="action_continue">Continue</string>
+    <string name="action_finish">Finish</string>
+    <string name="action_skip">Skip for now</string>
+    <string name="action_retry">Try again</string>
+    <string name="action_fix">Fix</string>
+    <string name="action_clear">Clear</string>
+    <string name="action_export">Export</string>
+    <string name="action_enable">Enable</string>
+    <string name="action_disable">Disable</string>
+    <string name="action_back">Back</string>
+    <string name="action_start">Start</string>
+    <string name="action_add">Add</string>
+    <string name="action_close">Close</string>
+    <string name="action_show_all">Show all</string>
+
+    <!-- Island content (overlay) -->
+    <string name="island_new_message">New message</string>
+    <string name="island_new_notification">New notification</string>
+    <string name="island_hidden_content">Content hidden</string>
+    <string name="island_incoming_call">Incoming call</string>
+    <string name="island_ongoing_call">On a call</string>
+    <string name="island_call_ended">Call ended</string>
+    <string name="island_call_on_hold">On hold</string>
+    <string name="island_restricted_number">Restricted</string>
+    <string name="island_charging">Charging</string>
+    <string name="island_charging_wireless">Charging wirelessly</string>
+    <string name="island_battery_full">Fully charged</string>
+    <string name="island_battery_low">Battery low</string>
+    <string name="island_battery_critical">Battery critical</string>
+    <string name="island_battery_threshold">Battery optimized at %1$d%%</string>
+    <string name="island_battery_percent">%1$d%%</string>
+    <string name="island_power_watts">%1$.0fW</string>
+    <string name="island_time_remaining">%1$d min left</string>
+    <string name="island_device_connected">%1$s connected</string>
+    <string name="island_device_disconnected">%1$s disconnected</string>
+    <string name="island_headphones">Headphones</string>
+    <string name="island_bluetooth_device">Bluetooth device</string>
+    <string name="island_watch">Watch</string>
+    <string name="island_car">Car</string>
+    <string name="island_speaker">Speaker</string>
+    <string name="island_alarm">Alarm</string>
+    <string name="island_alarm_in">Alarm in %1$d min</string>
+    <string name="island_alarm_at">Alarm at %1$s</string>
+    <string name="island_timer">Timer</string>
+    <string name="island_timer_complete">Timer complete</string>
+    <string name="island_stopwatch">Stopwatch</string>
+    <string name="island_downloading">Downloading</string>
+    <string name="island_download_complete">Download complete</string>
+    <string name="island_navigation">Navigation</string>
+    <string name="island_now_playing">Now playing</string>
+    <string name="island_paused">Paused</string>
+    <string name="island_demo">Island demo</string>
+    <string name="island_dnd_active">Do not disturb is on</string>
+    <string name="island_screen_recording">Screen recording</string>
+    <plurals name="island_grouped_notifications">
+        <item quantity="one">%1$d new notification</item>
+        <item quantity="other">%1$d new notifications</item>
+    </plurals>
+    <plurals name="island_active_events">
+        <item quantity="one">%1$d active event</item>
+        <item quantity="other">%1$d active events</item>
+    </plurals>
+
+    <!-- Distances / sizes -->
+    <string name="distance_meters">%1$d m</string>
+    <string name="distance_kilometers">%1$.1f km</string>
+    <string name="size_megabytes">%1$.1f MB</string>
+    <string name="size_gigabytes">%1$.2f GB</string>
+    <string name="progress_percent">%1$d%%</string>
+    <string name="download_progress">%1$s / %2$s</string>
+
+    <!-- Maneuvers -->
+    <string name="maneuver_straight">Continue</string>
+    <string name="maneuver_left">Turn left</string>
+    <string name="maneuver_right">Turn right</string>
+    <string name="maneuver_slight_left">Keep left</string>
+    <string name="maneuver_slight_right">Keep right</string>
+    <string name="maneuver_sharp_left">Sharp left</string>
+    <string name="maneuver_sharp_right">Sharp right</string>
+    <string name="maneuver_u_turn">Make a U-turn</string>
+    <string name="maneuver_merge">Merge</string>
+    <string name="maneuver_fork">Take the fork</string>
+    <string name="maneuver_roundabout">Enter the roundabout</string>
+    <string name="maneuver_exit">Take the exit</string>
+    <string name="maneuver_arrive">Arrive at destination</string>
+    <string name="maneuver_unknown">Continue</string>
+
+    <!-- Onboarding -->
+    <string name="onboarding_step_of">Step %1$d of %2$d</string>
+    <string name="onboarding_welcome_title">Meet Island.</string>
+    <string name="onboarding_welcome_body">A compact, animated surface around your camera cutout that shows what is happening right now — music, timers, calls, charging and the notifications that matter.</string>
+    <string name="onboarding_overlay_title">Let Island appear above your apps</string>
+    <string name="onboarding_overlay_body">Island needs the “Display over other apps” permission so the pill can float above whatever you are using. You stay in control: nothing is drawn until you enable Island, and you can revoke this at any time in system settings.</string>
+    <string name="onboarding_notifications_title">React to notifications</string>
+    <string name="onboarding_notifications_body">With notification access, Island can surface new notifications, group messages from the same app and read media playback. Everything is processed on your device — nothing is uploaded, and you can pick exactly which apps are allowed.</string>
+    <string name="onboarding_media_title">Music, timers and device events</string>
+    <string name="onboarding_media_body">Island reads the standard Android media session for playback, and can show timers, charging, Bluetooth audio and call state. Each of these has its own switch in settings and works independently of the others.</string>
+    <string name="onboarding_test_title">Try it now</string>
+    <string name="onboarding_test_body">Send a demo event to the island. Nothing leaves your phone — this is the same pipeline real events use.</string>
+    <string name="onboarding_done_title">Island is ready.</string>
+    <string name="onboarding_done_body">Your events will appear around the camera cutout. Tune the look, the position and what gets shown in settings.</string>
+
+    <!-- Dashboard -->
+    <string name="dashboard_title">Island</string>
+    <string name="dashboard_status_active">Active</string>
+    <string name="dashboard_status_paused">Paused</string>
+    <string name="dashboard_status_off">Off</string>
+    <string name="dashboard_section_permissions">Permissions</string>
+    <string name="dashboard_section_status">Current status</string>
+    <string name="dashboard_section_actions">Quick actions</string>
+    <string name="dashboard_row_overlay">Display over other apps</string>
+    <string name="dashboard_row_notifications">Notification access</string>
+    <string name="dashboard_row_media">Media session</string>
+    <string name="dashboard_row_service">Island service</string>
+    <string name="dashboard_row_battery_optimization">Battery optimization</string>
+    <string name="dashboard_row_island">Island</string>
+    <string name="dashboard_row_events">Events</string>
+    <string name="dashboard_row_battery">Battery</string>
+    <string name="dashboard_row_music">Music</string>
+    <string name="dashboard_empty_title">Island is ready.</string>
+    <string name="dashboard_empty_body">Your active events will appear here.</string>
+    <string name="dashboard_island_enable_title">Enable Island</string>
+    <string name="dashboard_island_enable_body">Draw the pill above your apps and start surfacing events.</string>
+    <string name="dashboard_state_granted">Granted</string>
+    <string name="dashboard_state_missing">Not granted</string>
+    <string name="dashboard_state_partial">Partial</string>
+    <string name="dashboard_state_unavailable">Unavailable</string>
+    <string name="dashboard_events_none">No active events</string>
+    <string name="dashboard_preview_label">Live preview</string>
+
+    <!-- Permission explanations & recovery -->
+    <string name="permission_overlay_title">Display over other apps</string>
+    <string name="permission_overlay_body">Island draws a small pill near your camera cutout. Android requires the “Display over other apps” permission for any window above other applications.</string>
+    <string name="permission_listener_title">Notification access</string>
+    <string name="permission_listener_body">Notification access lets Island see when a notification arrives, update or is dismissed. Content stays on your device and you choose which apps are monitored.</string>
+    <string name="permission_listener_how">In the screen that opens, find “Island notification access” and switch it on. Android may warn that the app can read notifications — that is exactly what this permission is for, and Island never stores content unless you enable history.</string>
+    <string name="permission_post_notifications_title">Island notifications</string>
+    <string name="permission_post_notifications_body">Used for timer completion and to tell you when Island stops working (for example after a permission is revoked).</string>
+    <string name="permission_bluetooth_title">Nearby devices</string>
+    <string name="permission_bluetooth_body">Lets Island name the headphones, watch or speaker that just connected. Island never scans for devices.</string>
+    <string name="permission_phone_title">Phone state</string>
+    <string name="permission_phone_body">Lets Island show an incoming or ongoing call with mute and end controls. Island never reads your call log, never records audio and never intercepts a call.</string>
+    <string name="permission_exact_alarm_title">Alarms &amp; reminders</string>
+    <string name="permission_exact_alarm_body">Lets a timer finish on time while the screen is off. Without it, Island falls back to an inexact alarm.</string>
+    <string name="permission_battery_title">Battery optimization</string>
+    <string name="permission_battery_body">Some phones aggressively stop background apps. If Island disappears after a while, allow it to run without restriction.</string>
+    <string name="permission_recovery_title">Island is partially disabled</string>
+    <string name="permission_recovery_overlay">Display-over-apps permission was revoked. Island cannot draw the pill.</string>
+    <string name="permission_recovery_listener">Notification access was revoked. Notifications and media events are paused; timers and device events still work.</string>
+    <string name="permission_recovery_notifications">Island cannot post its own notifications (timers will still show in the island).</string>
+    <string name="permission_recovery_open">Open Island</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_section_island">Island</string>
+    <string name="settings_section_notifications">Notifications</string>
+    <string name="settings_section_media">Media</string>
+    <string name="settings_section_calls">Calls</string>
+    <string name="settings_section_battery">Battery</string>
+    <string name="settings_section_devices">Devices</string>
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_section_behavior">Behavior</string>
+    <string name="settings_section_privacy">Privacy</string>
+    <string name="settings_section_advanced">Advanced</string>
+    <string name="settings_section_customize">Customize</string>
+    <string name="settings_section_diagnostics">Diagnostics</string>
+    <string name="settings_section_history">Event history</string>
+    <string name="settings_section_demo">Demo mode</string>
+
+    <string name="settings_island_enable">Enable island</string>
+    <string name="settings_island_enable_summary">Draw the pill above your apps.</string>
+    <string name="settings_island_position">Island position</string>
+    <string name="settings_island_position_summary">Auto-detect uses the live camera cutout and status bar insets.</string>
+    <string name="settings_island_size">Size</string>
+    <string name="settings_island_corner_radius">Corner radius</string>
+    <string name="settings_island_animation_intensity">Animation intensity</string>
+    <string name="settings_island_animation_style">Animation style</string>
+    <string name="settings_island_auto_collapse">Auto-collapse after</string>
+    <string name="settings_island_horizontal_offset">Horizontal offset</string>
+    <string name="settings_island_vertical_offset">Vertical offset</string>
+    <string name="settings_island_icon_size">Icon size</string>
+    <string name="settings_island_text_size">Text size</string>
+
+    <string name="settings_notifications_enable">Show notifications</string>
+    <string name="settings_notifications_access">Notification access</string>
+    <string name="settings_notifications_per_app">Per-app control</string>
+    <string name="settings_notifications_privacy">Privacy mode</string>
+    <string name="settings_notifications_grouping">Group same-app notifications</string>
+    <string name="settings_notifications_grouping_summary">Show “3 new messages” instead of three separate pills.</string>
+    <string name="settings_notifications_min_importance">Minimum importance</string>
+    <string name="settings_notifications_ongoing">Show ongoing notifications</string>
+    <string name="settings_notifications_expand_high">Expand on high importance</string>
+    <string name="settings_notifications_hide_sensitive">Hide sensitive content</string>
+    <string name="settings_notifications_hide_sensitive_summary">Never reveal text the source app marked private.</string>
+
+    <string name="settings_media_enable">Media island</string>
+    <string name="settings_media_art">Album art</string>
+    <string name="settings_media_controls">Playback controls</string>
+    <string name="settings_media_progress">Progress bar</string>
+    <string name="settings_media_waveform">Playing indicator</string>
+    <string name="settings_media_seek">Allow seeking</string>
+    <string name="settings_media_intro">Expanded intro duration</string>
+
+    <string name="settings_calls_incoming">Incoming call island</string>
+    <string name="settings_calls_ongoing">Ongoing call island</string>
+    <string name="settings_calls_controls">Call controls</string>
+    <string name="settings_calls_controls_summary">Mute and end from the island where Android allows it.</string>
+    <string name="settings_calls_handle">Show caller</string>
+
+    <string name="settings_battery_charging">Charging events</string>
+    <string name="settings_battery_full">Full charge</string>
+    <string name="settings_battery_low">Low battery</string>
+    <string name="settings_battery_animation">Charging animation</string>
+    <string name="settings_battery_wattage">Show power (watts)</string>
+    <string name="settings_battery_wattage_summary">Only shown when your device reports voltage and current.</string>
+    <string name="settings_battery_threshold">Battery threshold alert</string>
+    <string name="settings_battery_threshold_percent">Notify at</string>
+    <string name="settings_battery_low_percent">Low battery at</string>
+
+    <string name="settings_devices_bluetooth">Bluetooth devices</string>
+    <string name="settings_devices_wired">Wired headphones</string>
+    <string name="settings_devices_watch">Watches</string>
+    <string name="settings_devices_car">Car systems</string>
+    <string name="settings_devices_kinds">Which devices create events</string>
+    <string name="settings_devices_alarms">Alarm events</string>
+    <string name="settings_devices_alarm_lead">Alert before alarm</string>
+
+    <string name="settings_appearance_theme">Theme</string>
+    <string name="settings_appearance_dynamic_color">Dynamic color</string>
+    <string name="settings_appearance_dynamic_color_summary">Follow your wallpaper colors where Android supports it.</string>
+    <string name="settings_appearance_accent">Accent color</string>
+    <string name="settings_appearance_transparency">Transparency</string>
+    <string name="settings_appearance_blur">Blur</string>
+    <string name="settings_appearance_blur_summary">Subtle background blur behind the pill (Android 12+).</string>
+    <string name="settings_appearance_presets">Presets</string>
+
+    <string name="settings_behavior_tap">Tap action</string>
+    <string name="settings_behavior_double_tap">Double tap</string>
+    <string name="settings_behavior_long_press">Long press</string>
+    <string name="settings_behavior_swipe_horizontal">Swipe left / right</string>
+    <string name="settings_behavior_swipe_up">Swipe up</string>
+    <string name="settings_behavior_swipe_down">Swipe down</string>
+    <string name="settings_behavior_dnd">Follow system Do Not Disturb</string>
+    <string name="settings_behavior_dnd_critical">Allow critical events during DND</string>
+    <string name="settings_behavior_landscape">Landscape behavior</string>
+    <string name="settings_behavior_screen_off">Hide when screen is off</string>
+    <string name="settings_behavior_lock_screen">Show on lock screen</string>
+    <string name="settings_behavior_lock_screen_summary">Off by default: no content is exposed while locked.</string>
+    <string name="settings_behavior_haptics">Haptic feedback</string>
+    <string name="settings_behavior_reduce_motion">Reduce motion</string>
+    <string name="settings_behavior_reduce_motion_summary">Simple fades instead of springs. Also follows the system setting.</string>
+    <string name="settings_behavior_mini_island">Keep mini island for ongoing events</string>
+
+    <string name="settings_privacy_title">Privacy</string>
+    <string name="settings_privacy_body">Island processes everything on your device. There is no account, no server and no analytics.</string>
+    <string name="settings_privacy_lock_screen">Lock screen</string>
+    <string name="settings_privacy_history">Keep local event history</string>
+    <string name="settings_privacy_history_summary">Metadata only: type, time and app. Never backed up.</string>
+    <string name="settings_privacy_history_content">Store notification titles in history</string>
+    <string name="settings_privacy_history_content_summary">Off by default. Content never leaves the device.</string>
+    <string name="settings_privacy_history_retention">Keep history for</string>
+    <string name="settings_privacy_clear">Clear history</string>
+
+    <string name="settings_advanced_debug">Debug mode</string>
+    <string name="settings_advanced_logger">Event logger</string>
+    <string name="settings_advanced_demo">Demo mode</string>
+    <string name="settings_advanced_perf">Performance monitor</string>
+    <string name="settings_advanced_event_log">Open event log</string>
+    <string name="settings_advanced_diagnostics">Open diagnostics</string>
+    <string name="settings_advanced_reset">Reset configuration</string>
+    <string name="settings_advanced_reset_confirm">Reset every Island setting to its default? This cannot be undone.</string>
+
+    <!-- Per-app notification control -->
+    <string name="per_app_title">Per-app notifications</string>
+    <string name="per_app_body">Apps appear here after they post a notification while Island is running. Nothing is scanned in advance.</string>
+    <string name="per_app_empty">No apps yet</string>
+    <string name="per_app_empty_body">When an app posts a notification, it will be listed here so you can control it.</string>
+    <string name="per_app_mode_always">Always show</string>
+    <string name="per_app_mode_never">Never show</string>
+    <string name="per_app_mode_important">Only important</string>
+    <string name="per_app_mode_icon">Icon only</string>
+    <string name="per_app_mode_full">Full preview</string>
+
+    <!-- Enum labels -->
+    <string name="position_auto">Device automatic</string>
+    <string name="position_top_center">Top center</string>
+    <string name="position_lower">Slightly lower</string>
+    <string name="position_custom">Custom</string>
+    <string name="theme_pure_black">Pure black</string>
+    <string name="theme_dark_gray">Dark gray</string>
+    <string name="theme_dynamic">Dynamic</string>
+    <string name="privacy_full">Full</string>
+    <string name="privacy_private">Private</string>
+    <string name="privacy_icon_only">Icon only</string>
+    <string name="privacy_sensitive_hidden">Sensitive hidden</string>
+    <string name="animation_springy">Springy</string>
+    <string name="animation_smooth">Smooth</string>
+    <string name="animation_snappy">Snappy</string>
+    <string name="landscape_adapt">Adapt</string>
+    <string name="landscape_minimize">Minimize</string>
+    <string name="landscape_hide">Hide</string>
+    <string name="tap_expand">Expand</string>
+    <string name="tap_expand_or_open">Expand, then open app</string>
+    <string name="tap_open_app">Open source app</string>
+    <string name="double_tap_toggle">Toggle expanded</string>
+    <string name="double_tap_dismiss">Dismiss event</string>
+    <string name="double_tap_cycle">Switch event</string>
+    <string name="long_press_settings">Open Island settings</string>
+    <string name="long_press_open_app">Open source app</string>
+    <string name="long_press_dismiss">Dismiss event</string>
+    <string name="long_press_pin">Pin event</string>
+    <string name="swipe_cycle">Switch between events</string>
+    <string name="swipe_dismiss">Dismiss event</string>
+    <string name="swipe_expand">Expand</string>
+    <string name="swipe_none">Do nothing</string>
+    <string name="importance_none">None</string>
+    <string name="importance_min">Minimum</string>
+    <string name="importance_low">Low</string>
+    <string name="importance_default">Default</string>
+    <string name="importance_high">High</string>
+    <string name="importance_urgent">Urgent</string>
+    <string name="device_kind_headset">Wired headset</string>
+    <string name="device_kind_bluetooth_audio">Bluetooth audio</string>
+    <string name="device_kind_watch">Watch</string>
+    <string name="device_kind_car">Car</string>
+    <string name="device_kind_speaker">Speaker</string>
+    <string name="device_kind_other">Other</string>
+    <string name="preset_minimal">Minimal</string>
+    <string name="preset_classic">Classic</string>
+    <string name="preset_compact">Compact</string>
+    <string name="preset_large">Large</string>
+    <string name="preset_gaming">Gaming</string>
+    <string name="preset_music">Music</string>
+    <string name="preset_transparent">Transparent</string>
+    <string name="preset_dynamic">Dynamic</string>
+    <string name="preset_custom">Custom</string>
+    <string name="speed_half">0.5×</string>
+    <string name="speed_three_quarter">0.75×</string>
+    <string name="speed_one">1×</string>
+    <string name="speed_one_quarter_more">1.25×</string>
+    <string name="speed_one_half">1.5×</string>
+    <string name="duration_seconds">%1$d s</string>
+    <string name="duration_minutes">%1$d min</string>
+    <string name="duration_minutes_short">%1$dm</string>
+    <string name="value_percent">%1$d%%</string>
+
+    <!-- Timers -->
+    <string name="timers_title">Timers</string>
+    <string name="timers_tab_countdown">Countdown</string>
+    <string name="timers_tab_stopwatch">Stopwatch</string>
+    <string name="timers_empty">No timers running</string>
+    <string name="timers_empty_body">Start a countdown and it lives in the island.</string>
+    <string name="timers_custom">Custom</string>
+    <string name="timers_custom_title">Custom duration</string>
+    <string name="timers_hours">Hours</string>
+    <string name="timers_minutes">Minutes</string>
+    <string name="timers_seconds">Seconds</string>
+    <string name="timers_label_hint">Label (optional)</string>
+    <string name="timers_limit">You can run up to %1$d timers at once.</string>
+    <string name="timer_notification_default_label">Timer</string>
+    <string name="timer_complete_title">Timer complete</string>
+    <string name="stopwatch_laps">Laps</string>
+    <string name="stopwatch_lap_number">Lap %1$d</string>
+    <string name="stopwatch_split">Split</string>
+    <string name="stopwatch_total">Total</string>
+    <string name="stopwatch_empty">00:00.00</string>
+
+    <!-- Demo -->
+    <string name="demo_title">Demo mode</string>
+    <string name="demo_body">These events are generated locally by Island and use the exact same pipeline as real events. Nothing is sent anywhere.</string>
+    <string name="demo_notification">Demo notification</string>
+    <string name="demo_grouped_notification">Demo grouped messages</string>
+    <string name="demo_music">Demo music</string>
+    <string name="demo_timer">Demo timer</string>
+    <string name="demo_stopwatch">Demo stopwatch</string>
+    <string name="demo_call">Demo incoming call</string>
+    <string name="demo_call_active">Demo active call</string>
+    <string name="demo_charging">Demo charging</string>
+    <string name="demo_battery_low">Demo low battery</string>
+    <string name="demo_download">Demo download</string>
+    <string name="demo_bluetooth">Demo headphones</string>
+    <string name="demo_navigation">Demo navigation</string>
+    <string name="demo_alarm">Demo alarm</string>
+    <string name="demo_custom">Demo custom event</string>
+    <string name="demo_clear">Clear all events</string>
+    <string name="demo_section_notifications">Notifications</string>
+    <string name="demo_section_media">Media</string>
+    <string name="demo_section_timers">Timers</string>
+    <string name="demo_section_device">Device</string>
+    <string name="demo_section_other">Other</string>
+
+    <!-- Diagnostics -->
+    <string name="diagnostics_title">Diagnostics</string>
+    <string name="diagnostics_body">Everything Island checks at runtime, and what each missing permission disables.</string>
+    <string name="diagnostics_section_capabilities">Capabilities</string>
+    <string name="diagnostics_section_state">Island state</string>
+    <string name="diagnostics_section_device">Device</string>
+    <string name="diagnostics_section_oem">Manufacturer notes</string>
+    <string name="diagnostics_state_phase">Phase</string>
+    <string name="diagnostics_state_events">Active events</string>
+    <string name="diagnostics_state_service">Service</string>
+    <string name="diagnostics_state_overlay">Overlay window</string>
+    <string name="diagnostics_state_listener">Notification listener</string>
+    <string name="diagnostics_state_media">Media session</string>
+    <string name="diagnostics_state_last_event">Last event</string>
+    <string name="diagnostics_state_uptime">Uptime</string>
+    <string name="diagnostics_device_model">Model</string>
+    <string name="diagnostics_device_manufacturer">Manufacturer</string>
+    <string name="diagnostics_device_android">Android version</string>
+    <string name="diagnostics_device_cutout">Display cutout</string>
+    <string name="diagnostics_running">Running</string>
+    <string name="diagnostics_stopped">Stopped</string>
+    <string name="diagnostics_attached">Attached</string>
+    <string name="diagnostics_detached">Detached</string>
+    <string name="diagnostics_connected">Connected</string>
+    <string name="diagnostics_disconnected">Disconnected</string>
+    <string name="diagnostics_available">Available</string>
+    <string name="diagnostics_unavailable">Unavailable</string>
+    <string name="diagnostics_none_yet">None yet</string>
+    <string name="diagnostics_oem_body">Your device is made by %1$s. If Island stops appearing after a while, allow it to run in the background and disable battery optimization for Island.</string>
+    <string name="diagnostics_open_oem_settings">Open battery settings</string>
+    <string name="diagnostics_cutout_none">No cutout detected</string>
+    <string name="diagnostics_cutout_found">%1$s at %2$d × %3$d dp</string>
+    <string name="diagnostics_status_bar">Status bar inset: %1$d dp</string>
+
+    <!-- Performance monitor -->
+    <string name="perf_title">Performance</string>
+    <string name="perf_fps">Frame rate</string>
+    <string name="perf_frame_time">Frame time</string>
+    <string name="perf_animation_latency">Animation latency</string>
+    <string name="perf_memory">App memory</string>
+    <string name="perf_heap">Java heap</string>
+    <string name="perf_state">Island state</string>
+    <string name="perf_events">Active events</string>
+    <string name="perf_overlay">Overlay</string>
+    <string name="perf_service">Service</string>
+    <string name="perf_last_event">Last event</string>
+    <string name="perf_body">Sampled only while this screen is open. Island collects no telemetry.</string>
+
+    <!-- Event log -->
+    <string name="event_log_title">Event log</string>
+    <string name="event_log_body">In-memory only, cleared when Island restarts. Sensitive content is never logged.</string>
+    <string name="event_log_empty">No events logged yet</string>
+    <string name="event_log_clear">Clear log</string>
+    <string name="event_log_export">Export log</string>
+    <string name="event_log_share_title">Island event log</string>
+
+    <!-- History -->
+    <string name="history_title">Event history</string>
+    <string name="history_body">Opt-in and metadata only. Stored on this device, never backed up, never uploaded.</string>
+    <string name="history_empty">No history yet</string>
+    <string name="history_empty_body">Enable history in Privacy settings to keep a local record of island events.</string>
+    <string name="history_disabled">History is off</string>
+    <string name="history_enable">Enable history</string>
+    <string name="history_search_hint">Search apps or event types</string>
+    <string name="history_clear">Clear history</string>
+    <string name="history_export">Export</string>
+    <string name="history_entries">%1$d entries</string>
+    <string name="history_action_shown">Shown</string>
+    <string name="history_action_expanded">Expanded</string>
+    <string name="history_action_collapsed">Collapsed</string>
+    <string name="history_action_dismissed">Dismissed</string>
+    <string name="history_action_expired">Expired</string>
+    <string name="history_action_tapped">Action tapped</string>
+    <string name="history_action_suppressed">Suppressed</string>
+
+    <!-- Customize -->
+    <string name="customize_title">Customize</string>
+    <string name="customize_body">Shape, size, motion and color. The preview below uses the real island renderer.</string>
+    <string name="customize_section_shape">Shape &amp; size</string>
+    <string name="customize_section_motion">Motion</string>
+    <string name="customize_section_color">Color</string>
+    <string name="customize_section_position">Position</string>
+    <string name="customize_reset">Reset to preset</string>
+    <string name="customize_accent_none">Default</string>
+    <string name="customize_preview_event">Preview event</string>
+
+    <!-- Errors / edge cases -->
+    <string name="error_overlay_denied">Island cannot draw the pill without the display-over-apps permission.</string>
+    <string name="error_listener_denied">Notifications and media are paused until notification access is granted.</string>
+    <string name="error_service_stopped">The Island service was stopped by the system. Tap to restart it.</string>
+    <string name="error_window_failed">The overlay window could not be attached on this device.</string>
+    <string name="error_settings_unavailable">This system settings screen is not available on your device.</string>
+    <string name="error_generic">Something went wrong. Island keeps running with the features that are available.</string>
+
+    <!-- Accessibility -->
+    <string name="a11y_island_collapsed">Island, collapsed. %1$s</string>
+    <string name="a11y_island_expanded">Island, expanded. %1$s</string>
+    <string name="a11y_island_expand">Expand island</string>
+    <string name="a11y_island_collapse">Collapse island</string>
+    <string name="a11y_island_dismiss">Dismiss event</string>
+    <string name="a11y_island_next_event">Next event</string>
+    <string name="a11y_island_previous_event">Previous event</string>
+    <string name="a11y_album_art">Album artwork</string>
+    <string name="a11y_playing">Playing</string>
+    <string name="a11y_paused">Paused</string>
+    <string name="a11y_progress">Progress %1$d percent</string>
+    <string name="a11y_app_icon">%1$s icon</string>
+    <string name="a11y_battery_level">Battery %1$d percent</string>
+    <string name="a11y_queue_position">Event %1$d of %2$d</string>
+    <string name="a11y_close">Close</string>
+    <string name="a11y_settings">Settings</string>
+    <string name="a11y_more">More</string>
+</resources>

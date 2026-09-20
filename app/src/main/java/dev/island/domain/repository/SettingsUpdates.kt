@@ -76,6 +76,25 @@ suspend fun SettingsRepository.setAppNotificationMode(
     current.copy(notifications = current.notifications.copy(appRules = rules))
 }
 
+/** Records an app that posted a notification, so the user can control it later. */
+suspend fun SettingsRepository.recordSeenApp(packageName: String, appLabel: String?) {
+    if (packageName.isBlank()) return
+    update { current ->
+        val seen = current.notifications.seenApps
+        if (seen.containsKey(packageName) && (appLabel == null || seen[packageName] == appLabel)) {
+            return@update current
+        }
+        current.copy(
+            notifications = current.notifications.copy(
+                seenApps = (seen + (packageName to (appLabel ?: seen[packageName] ?: packageName))).take(MAX_SEEN_APPS),
+            ),
+        )
+    }
+}
+
+/** Upper bound for the per-app list; oldest entries are dropped first. */
+private const val MAX_SEEN_APPS = 200
+
 suspend fun SettingsRepository.setDeviceKindEnabled(kind: ConnectedDeviceKind, enabled: Boolean) =
     update { current ->
         val kinds = current.devices.allowedKinds.toMutableSet()
