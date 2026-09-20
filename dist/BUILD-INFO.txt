@@ -1,0 +1,9 @@
+built from 106f2a9bf9e491ee0038c93627bfe6f8a038f616
+gradle: 
+
+total 19904
+drwxr-xr-x  2 runner runner     4096 Sep 20 07:25 .
+drwxr-xr-x 13 runner runner     4096 Sep 20 07:25 ..
+-rw-r--r--  1 runner runner       62 Sep 20 07:25 BUILD-INFO.txt
+-rw-r--r--  1 runner runner 18393638 Sep 20 07:25 island-debug.apk
+-rw-r--r--  1 runner runner  1971010 Sep 20 07:25 island-release.apk
