@@ -1,7 +1,6 @@
 package dev.island.data.media
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import dev.island.core.logging.IslandLogger
@@ -70,19 +69,21 @@ class ArtworkCache(private val logger: IslandLogger) {
     }
 }
 
-/** Helpers for reading artwork out of [MediaMetadata] in the documented precedence order. */
+/**
+ * Reads artwork out of [MediaMetadata] in the documented precedence order.
+ *
+ * [MediaMetadata] only publishes typed getters — there is no `getByteArray` or `getBundle` — so a
+ * player that publishes art purely as a content Uri is picked up through its [MediaDescription]'s
+ * icon bitmap when it provides one. Decoding a Uri here would mean file I/O on the caller's thread
+ * (the session callback thread), which is exactly the jank Island avoids; the renderer draws its
+ * music glyph instead, and the artwork cache keeps one decode per track.
+ */
 object ArtworkReader {
     fun from(metadata: MediaMetadata?): Bitmap? {
         if (metadata == null) return null
         metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)?.let { return it }
         metadata.getBitmap(MediaMetadata.METADATA_KEY_ART)?.let { return it }
         metadata.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)?.let { return it }
-        val bundle = metadata.bundle
-        val bytes: ByteArray? = bundle?.getByteArray(MediaMetadata.METADATA_KEY_ALBUM_ART)
-            ?: bundle?.getByteArray(MediaMetadata.METADATA_KEY_ART)
-        if (bytes != null && bytes.isNotEmpty()) {
-            return runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
-        }
-        return null
+        return metadata.description?.iconBitmap
     }
 }
