@@ -515,7 +515,7 @@ private fun IslandHostScreen(
                 Text("Open app battery & background settings")
             }
             Text("The island stays above ordinary apps while running. Android can hide overlays on protected screens and apps that block overlays.", color = Color(0xFFB8C1BA), fontSize = 13.sp)
-            BehaviorToggle("System-bar touch clearance", "Keeps the island below protected system touch areas, including when using position offsets. Disable to try exact camera overlap; touches may then go to the system.", options.clearSystemBars) { onOptions(options.copy(clearSystemBars = it)) }
+            BehaviorToggle("System-bar touch clearance", "Keeps automatic placement clear of system touch areas. Moving the island upwards overrides top clearance; touches there may go to Android.", options.clearSystemBars) { onOptions(options.copy(clearSystemBars = it)) }
             OutlinedButton(onClick = {
                 onResetPlacement()
                 onOptions(options.copy(clearSystemBars = true))

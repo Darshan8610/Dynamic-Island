@@ -36,11 +36,14 @@ object CapsuleAnchor {
         var left = (cx - w / 2f + safeOffset(offsetX)).roundToInt().coerceIn(0, screenWidth - w)
         var top = (cy - h / 2f + safeOffset(offsetY)).roundToInt().coerceIn(0, screenHeight - h)
         if (clearSystemBars) {
-            // Apply the exclusion *after* user offsets. Otherwise a negative nudge
-            // silently moved the capsule back underneath the system's touch area.
+            // Keep automatic placement clear of system bars. An explicit upward
+            // offset is a deliberate override, so the slider can reach the top edge.
             // If the display is too small, keep the window on-screen instead.
             when (edge) {
-                0 -> top = maxOf(top, (statusBarTop.coerceAtLeast(0) + gap).coerceAtMost(screenHeight - h))
+                0 -> {
+                    val base = maxOf(cy - h / 2f, (statusBarTop.coerceAtLeast(0) + gap).coerceAtMost(screenHeight - h).toFloat())
+                    top = (base + safeOffset(offsetY)).roundToInt().coerceIn(0, screenHeight - h)
+                }
                 1 -> left = maxOf(left, (safeLeft.coerceAtLeast(0) + gap).coerceAtMost(screenWidth - w))
                 2 -> left = minOf(left, (screenWidth - safeRight.coerceAtLeast(0) - gap - w).coerceAtLeast(0))
                 3 -> top = minOf(top, (screenHeight - safeBottom.coerceAtLeast(0) - gap - h).coerceAtLeast(0))
