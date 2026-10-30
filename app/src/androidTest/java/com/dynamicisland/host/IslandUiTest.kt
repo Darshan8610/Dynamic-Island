@@ -159,7 +159,14 @@ class IslandUiTest {
                 }
             }
             device.waitForIdle()
-            control("Primary island. Open controls") { it.longClick() }
+            compose.waitForIdle()
+            // Inject the hold with Compose's event clock; a wall-clock-only gesture can
+            // release before the test clock reaches the pointer-input long-press timeout.
+            compose.onNode(
+                hasContentDescription("Primary island. Open controls") and
+                    SemanticsMatcher("capsule at the service window origin") { kotlin.math.abs(it.boundsInRoot.top) < 1f },
+                useUnmergedTree = true
+            ).performTouchInput { longClick(durationMillis = 1000L) }
             control("Next track") { it.isEnabled }
             control("Collapse island") { it.click() }
             control("Primary island. Open controls") { it.isEnabled }
