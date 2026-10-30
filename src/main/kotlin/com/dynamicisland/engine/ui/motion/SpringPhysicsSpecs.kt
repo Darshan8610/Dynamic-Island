@@ -26,8 +26,8 @@ object SpringPhysicsSpecs {
      * T0 = 0.50s, zeta = 0.80 -> k = 157.91 N/m, c = 20.11 N*s/m
      */
     val CompactToExpandedSpec: SpringSpec<Float> = spring(
-        dampingRatio = 0.80f,
-        stiffness = 157.91f
+        dampingRatio = 0.823f,
+        stiffness = 466.67f
     )
 
     /**
@@ -35,8 +35,8 @@ object SpringPhysicsSpecs {
      * T0 = 0.36s, zeta = 0.85 -> k = 304.47 N/m, c = 29.67 N*s/m
      */
     val ExpandedToCompactSpec: SpringSpec<Float> = spring(
-        dampingRatio = 0.85f,
-        stiffness = 304.47f
+        dampingRatio = 0.88f,
+        stiffness = 385.53f
     )
 
     /**

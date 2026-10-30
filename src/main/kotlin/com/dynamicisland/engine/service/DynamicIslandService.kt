@@ -243,13 +243,16 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
                 val count by repository.notificationCount.collectAsState()
                 val status by repository.priorityArbiter.actionStatus.collectAsState()
                 val microphoneActive by repository.isMicrophoneInUse.collectAsState()
+                val cameraActive by repository.isCameraInUse.collectAsState()
                 val animateContent = !options.reducedMotion && options.motion != MotionPreset.NONE && ValueAnimator.areAnimatorsEnabled()
                 Box(Modifier.fillMaxSize()) {
                     if (!panelVisible || locked) FixedIslandCapsule(state, playback, locked, windowRotation,
                         onOpen = { openPanel(false) },
                         onPlayPause = { if (!locked && keyguard?.isKeyguardLocked != true) { IslandHaptics.perform(this@DynamicIslandService);playPause() } },
                         options = options, onGesture = { routeGesture(it,false) },
-                        cornerRadius = androidx.compose.ui.unit.Dp(windowCorner), microphoneActive = microphoneActive)
+                        cornerRadius = androidx.compose.ui.unit.Dp(windowCorner),
+                        microphoneActive = microphoneActive,
+                        cameraActive = cameraActive)
                     // Removing this subtree immediately on lock avoids retaining private content
                     // during an exit animation. Re-targeting visibility cancels any entrance.
                     if (!locked) AnimatedVisibility(visible = panelVisible,
@@ -263,10 +266,20 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
                             onAnswer = ::answer, onHangup = ::hangup, onMute = ::toggleMute,
                             onSpeaker = ::toggleSpeaker, actionStatus = status)
                     }
-                    if (panelVisible && !locked && microphoneActive) {
+                    if (panelVisible && !locked && (microphoneActive || cameraActive)) {
+                        val privacyColor = when {
+                            microphoneActive && cameraActive -> Color(0xFF0A84FF)
+                            cameraActive -> Color(0xFF30D158)
+                            else -> Color(0xFFFF9F0A)
+                        }
+                        val privacyDesc = when {
+                            microphoneActive && cameraActive -> "Microphone and camera in use"
+                            cameraActive -> "Camera in use"
+                            else -> "Microphone in use"
+                        }
                         Box(Modifier.align(Alignment.CenterEnd).padding(end = 3.dp).size(5.dp)
-                            .background(Color(0xFFFF9F0A), CircleShape)
-                            .semantics { contentDescription = "Microphone recording detected" })
+                            .background(privacyColor, CircleShape)
+                            .semantics { contentDescription = privacyDesc })
                     }
                 }
             }

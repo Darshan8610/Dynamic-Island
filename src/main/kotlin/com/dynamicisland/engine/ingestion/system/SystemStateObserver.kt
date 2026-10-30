@@ -1,4 +1,4 @@
-﻿package com.dynamicisland.engine.ingestion.system
+package com.dynamicisland.engine.ingestion.system
 
 import android.Manifest
 import android.app.KeyguardManager
@@ -12,6 +12,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.os.BatteryManager
@@ -89,8 +90,11 @@ class SystemStateObserver(
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
     private val _isCameraInUse = MutableStateFlow(false)
     val isCameraInUse: StateFlow<Boolean> = _isCameraInUse.asStateFlow()
+    private val monitoredCameraIds = mutableSetOf<String>()
     private val unavailableCameras = mutableSetOf<String>()
+    private val activeTorchCameras = mutableSetOf<String>()
     private var cameraAvailabilityCallback: CameraManager.AvailabilityCallback? = null
+    private var cameraTorchCallback: CameraManager.TorchCallback? = null
     private val _isMicInUse = MutableStateFlow(false)
     val isMicInUse: StateFlow<Boolean> = _isMicInUse.asStateFlow()
 
@@ -109,26 +113,13 @@ class SystemStateObserver(
                 Intent.ACTION_SCREEN_OFF -> emitKeyguardLocked(true)
                 Intent.ACTION_USER_PRESENT -> emitKeyguardLocked(false)
                 Intent.ACTION_SCREEN_ON -> emitKeyguardLocked(keyguardManager?.isKeyguardLocked == true)
-        cameraManager?.let { cm ->
-            val cb = object : CameraManager.AvailabilityCallback() {
-                override fun onCameraUnavailable(cameraId: String) {
-                    synchronized(unavailableCameras) {
-                        unavailableCameras.add(cameraId)
-                        _isCameraInUse.value = unavailableCameras.isNotEmpty()
-                    }
-                }
-                override fun onCameraAvailable(cameraId: String) {
-                    synchronized(unavailableCameras) {
-                        unavailableCameras.remove(cameraId)
-                        _isCameraInUse.value = unavailableCameras.isNotEmpty()
-                    }
-                }
-            }
-            cameraAvailabilityCallback = cb
-            cm.registerAvailabilityCallback(cb, null)
-        }
             }
         }
+    }
+
+    private fun updateCameraInUseLocked() {
+        val activeSensors = unavailableCameras.filter { it !in activeTorchCameras }
+        _isCameraInUse.value = activeSensors.isNotEmpty()
     }
 
     private fun emitKeyguardLocked(isLocked: Boolean) {
@@ -180,22 +171,62 @@ class SystemStateObserver(
         lastRingerMode = audioManager?.ringerMode ?: AudioManager.RINGER_MODE_NORMAL
         emitKeyguardLocked(keyguardManager?.isKeyguardLocked == true)
         cameraManager?.let { cm ->
+            runCatching {
+                monitoredCameraIds.clear()
+                for (id in cm.cameraIdList) {
+                    val characteristics = cm.getCameraCharacteristics(id)
+                    val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
+                    if (facing == CameraCharacteristics.LENS_FACING_BACK ||
+                        facing == CameraCharacteristics.LENS_FACING_FRONT ||
+                        facing == CameraCharacteristics.LENS_FACING_EXTERNAL
+                    ) {
+                        monitoredCameraIds.add(id)
+                    }
+                }
+            }
+
             val cb = object : CameraManager.AvailabilityCallback() {
                 override fun onCameraUnavailable(cameraId: String) {
-                    synchronized(unavailableCameras) {
-                        unavailableCameras.add(cameraId)
-                        _isCameraInUse.value = unavailableCameras.isNotEmpty()
+                    if (monitoredCameraIds.isEmpty() || monitoredCameraIds.contains(cameraId)) {
+                        synchronized(unavailableCameras) {
+                            unavailableCameras.add(cameraId)
+                            updateCameraInUseLocked()
+                        }
                     }
                 }
                 override fun onCameraAvailable(cameraId: String) {
                     synchronized(unavailableCameras) {
                         unavailableCameras.remove(cameraId)
-                        _isCameraInUse.value = unavailableCameras.isNotEmpty()
+                        updateCameraInUseLocked()
                     }
                 }
             }
             cameraAvailabilityCallback = cb
-            cm.registerAvailabilityCallback(cb, null)
+
+            val torchCb = object : CameraManager.TorchCallback() {
+                override fun onTorchModeChanged(cameraId: String, enabled: Boolean) {
+                    synchronized(unavailableCameras) {
+                        if (enabled) {
+                            activeTorchCameras.add(cameraId)
+                        } else {
+                            activeTorchCameras.remove(cameraId)
+                        }
+                        updateCameraInUseLocked()
+                    }
+                }
+                override fun onTorchModeUnavailable(cameraId: String) {
+                    synchronized(unavailableCameras) {
+                        activeTorchCameras.remove(cameraId)
+                        updateCameraInUseLocked()
+                    }
+                }
+            }
+            cameraTorchCallback = torchCb
+
+            runCatching {
+                cm.registerAvailabilityCallback(cb, null)
+                cm.registerTorchCallback(torchCb, null)
+            }
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -228,7 +259,15 @@ class SystemStateObserver(
             runCatching { cameraManager?.unregisterAvailabilityCallback(cb) }
             cameraAvailabilityCallback = null
         }
-        synchronized(unavailableCameras) { unavailableCameras.clear() }
+        cameraTorchCallback?.let { cb ->
+            runCatching { cameraManager?.unregisterTorchCallback(cb) }
+            cameraTorchCallback = null
+        }
+        synchronized(unavailableCameras) {
+            unavailableCameras.clear()
+            activeTorchCameras.clear()
+            monitoredCameraIds.clear()
+        }
         _isCameraInUse.value = false
         _isMicInUse.value = false
         batteryBaselineCaptured = false
