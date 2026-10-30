@@ -89,8 +89,14 @@ class IslandUiTest {
         val device = UiDevice.getInstance(instrumentation)
         val listener = "${context.packageName}/com.dynamicisland.engine.ingestion.notifications.DynamicIslandNotificationListener"
         fun waitForDescription(description: String): androidx.test.uiautomator.UiObject2 {
-            return device.wait(androidx.test.uiautomator.Until.findObject(androidx.test.uiautomator.By.desc(description)), 20000)
-                ?: error("Missing overlay control: $description")
+            val control = device.wait(androidx.test.uiautomator.Until.findObject(androidx.test.uiautomator.By.desc(description)), 20000)
+            if (control != null) return control
+            val options = BehaviorPreferences.get(context).options.value
+            android.util.Log.e("IslandUiTest", "Missing=$description state=${DynamicIslandService.state.value} running=${DynamicIslandService.isRunning} error=${DynamicIslandService.error.value} mode=${options.interactionMode} tap=${options.tapAction}")
+            val hierarchy = java.io.ByteArrayOutputStream()
+            device.dumpWindowHierarchy(hierarchy)
+            hierarchy.toString("UTF-8").chunked(3000).forEach { android.util.Log.e("IslandUiTest", it) }
+            error("Missing overlay control: $description")
         }
         try {
             shell("appops set ${context.packageName} SYSTEM_ALERT_WINDOW allow")
