@@ -89,6 +89,7 @@ class IslandUiTest {
         val device = UiDevice.getInstance(instrumentation)
         val listener = "${context.packageName}/com.dynamicisland.engine.ingestion.notifications.DynamicIslandNotificationListener"
         fun waitForDescription(description: String): androidx.test.uiautomator.UiObject2 {
+            compose.waitForIdle()
             var control: androidx.test.uiautomator.UiObject2? = null
             try {
                 // ComposeRule owns every ComposeView's frame clock, including service windows.
