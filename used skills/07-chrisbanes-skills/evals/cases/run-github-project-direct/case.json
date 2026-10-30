@@ -1,0 +1,41 @@
+{
+  "id": "run-github-project-direct",
+  "title": "Authorize Todo work from current column without event history",
+  "family": "workflow",
+  "target_skills": [
+    "run-github-project"
+  ],
+  "expected_skills": [
+    "run-github-project"
+  ],
+  "task_mode": "review",
+  "kind": "direct",
+  "fixture": "workflow",
+  "allowed_write_paths": [],
+  "forbidden_command_patterns": [
+    "\\b(?:gh|git)\\s+(?:api|issue|pr|project|push|fetch|pull)\\b"
+  ],
+  "validators": [
+    {
+      "argv": [
+        "python3",
+        "@validators/text_case.py",
+        "run-github-project-direct"
+      ],
+      "timeout_seconds": 30
+    }
+  ],
+  "rubric": [
+    {
+      "id": "planning-eligibility",
+      "text": "Treats current Todo membership plus ready-for-agent role as eligible without fetching or requiring transition history, actor, automation, timestamp, or manual approval."
+    },
+    {
+      "id": "controller",
+      "text": "The response keeps assignment and shared Project mutation with the controller rather than an implementation worker"
+    }
+  ],
+  "provenance": {
+    "kind": "synthetic"
+  }
+}

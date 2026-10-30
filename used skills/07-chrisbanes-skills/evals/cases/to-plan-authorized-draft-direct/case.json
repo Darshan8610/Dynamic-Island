@@ -1,0 +1,56 @@
+{
+  "id": "to-plan-authorized-draft-direct",
+  "title": "Draft a confirmed plan with stable task dependencies",
+  "family": "workflow",
+  "target_skills": [
+    "to-plan"
+  ],
+  "expected_skills": [
+    "to-plan"
+  ],
+  "task_mode": "edit",
+  "kind": "direct",
+  "fixture": "workflow-plan",
+  "allowed_write_paths": [
+    ".scratch/to-plan"
+  ],
+  "forbidden_command_patterns": [
+    "\\b(?:gh|git)\\s+(?:api|issue|pr|project|push|fetch|pull)\\b"
+  ],
+  "validators": [
+    {
+      "argv": [
+        "python3",
+        "@validators/text_case.py",
+        "to-plan-authorized-draft-direct"
+      ],
+      "timeout_seconds": 30
+    }
+  ],
+  "rubric": [
+    {
+      "id": "local-draft",
+      "text": "Creates one marked local plan from the authorized task without requesting redundant confirmation"
+    },
+    {
+      "id": "executable-plan",
+      "text": "The generated plan identifies existing files and symbols, states the intended change and affected ownership in validator.py without requiring a detailed edit recipe for this known change, and specifies the existing test setup, a path-with-spaces input, exact-output assertion, expected red failure, working directory, focused command, expected green result, and observable acceptance condition without implementing the change"
+    },
+    {
+      "id": "proportionality",
+      "text": "Keeps this evidence-backed one-function change to one implementation slice without a speculative proof task or proof prerequisite, because the repository already provides sufficient evidence; uses a signature or pseudocode only if it removes real ambiguity and does not add speculative implementation branches"
+    },
+    {
+      "id": "executor-readiness",
+      "text": "Leaves no investigate-or-decide work for the executor and limits autonomous repair to the fixed contract and explicit diagnosis/edit-validation budget"
+    },
+    {
+      "id": "publication-boundary",
+      "text": "Keeps the plan local and does not publish or contact a remote provider"
+    }
+  ],
+  "provenance": {
+    "kind": "synthetic"
+  },
+  "calibration": true
+}

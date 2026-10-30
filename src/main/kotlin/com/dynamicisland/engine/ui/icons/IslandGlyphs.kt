@@ -203,6 +203,27 @@ private fun DrawScope.drawGlyph24(symbol: IslandSymbol, color: Color) {
         }
 
         IslandSymbol.NAVIGATION -> drawPath(navigationPath, color)
+        IslandSymbol.DELIVERY -> {
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(3.0f, 7.0f),
+                size = Size(12.0f, 9.0f),
+                cornerRadius = CornerRadius(2.0f, 2.0f),
+                style = Stroke(stroke)
+            )
+            line(15.0f, 10.0f, 19.5f, 10.0f)
+            line(19.5f, 10.0f, 21.0f, 13.5f)
+            line(21.0f, 13.5f, 21.0f, 16.0f)
+            line(15.0f, 16.0f, 21.0f, 16.0f)
+            drawCircle(color, 2.2f, Offset(7.2f, 17.8f))
+            drawCircle(color, 2.2f, Offset(17.5f, 17.8f))
+        }
+        IslandSymbol.DOWNLOAD -> {
+            line(12f, 3.8f, 12f, 15.2f, 2.2f)
+            line(7.8f, 11.4f, 12f, 15.6f, 2.2f)
+            line(16.2f, 11.4f, 12f, 15.6f, 2.2f)
+            line(5.0f, 19.5f, 19.0f, 19.5f, 2.2f)
+        }
 
         IslandSymbol.MIC -> {
             rrect(9.0f, 2.4f, 15.0f, 13.2f, 3.0f)

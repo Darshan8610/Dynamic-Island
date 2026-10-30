@@ -1,0 +1,50 @@
+{
+  "id": "to-plan-discussion-only-negative",
+  "title": "Discuss a complete plan without inferring write permission",
+  "family": "workflow",
+  "target_skills": [
+    "to-plan"
+  ],
+  "expected_skills": [
+    "to-plan"
+  ],
+  "task_mode": "review",
+  "kind": "negative",
+  "fixture": "workflow",
+  "allowed_write_paths": [],
+  "forbidden_command_patterns": [
+    "\\b(?:gh|git)\\s+(?:api|issue|pr|project|push|fetch|pull)\\b"
+  ],
+  "validators": [
+    {
+      "argv": [
+        "python3",
+        "@validators/text_case.py",
+        "to-plan-discussion-only-negative"
+      ],
+      "timeout_seconds": 30
+    }
+  ],
+  "rubric": [
+    {
+      "id": "discussion-only",
+      "text": "Reviews the supplied complete plan in the response without creating or editing a local draft; completeness is not writing permission."
+    },
+    {
+      "id": "no-unnecessary-confirmation",
+      "text": "Answers the requested review directly without demanding confirmation to draft or inventing unresolved decisions."
+    },
+    {
+      "id": "no-handoff-overreach",
+      "text": "Does not create an executor-readiness checklist, implementation recipe, or repair budget when the user asked only to discuss the supplied plan."
+    },
+    {
+      "id": "proportional-validation",
+      "text": "Retains the meaningful behavioral test for the diagnostic change, while accepting Markdown lint and a scoped diff check for the documentation-only correction without inventing a test file, seam, or separate approval."
+    }
+  ],
+  "provenance": {
+    "kind": "synthetic"
+  },
+  "calibration": true
+}

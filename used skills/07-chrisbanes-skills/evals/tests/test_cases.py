@@ -1,0 +1,166 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from evals.harness.cases import (
+    CaseValidationError,
+    load_case,
+    validate_corpus,
+    validate_skill_entrypoint_sizes,
+)
+
+
+def valid_manifest(**overrides):
+    manifest = {
+        "id": "compose-state-authoring-direct",
+        "title": "Replace unsafe public mutable state",
+        "family": "state-effects",
+        "target_skills": ["compose-state-and-effects"],
+        "expected_skills": ["compose-state-and-effects"],
+        "task_mode": "edit",
+        "kind": "direct",
+        "fixture": "compose-jvm",
+        "allowed_write_paths": ["src/main/kotlin/example/Subject.kt"],
+        "validators": [
+            {"argv": ["python3", "checks/check_subject.py"], "timeout_seconds": 30}
+        ],
+        "rubric": [{"id": "safe-state", "text": "State writes are snapshot-aware"}],
+        "provenance": {"kind": "synthetic"},
+    }
+    manifest.update(overrides)
+    return manifest
+
+
+class CaseContractTest(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        (self.root / "skills" / "compose-state-and-effects").mkdir(parents=True)
+        (self.root / "skills" / "compose-state-and-effects" / "SKILL.md").write_text(
+            "---\nname: compose-state-and-effects\n---\n", encoding="utf-8"
+        )
+        (self.root / "skills" / "using-chrisbanes-skills").mkdir(parents=True)
+        (self.root / "skills" / "using-chrisbanes-skills" / "SKILL.md").write_text(
+            "---\nname: using-chrisbanes-skills\n---\n", encoding="utf-8"
+        )
+        (self.root / "evals" / "fixtures" / "compose-jvm").mkdir(parents=True)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def write_case(self, manifest):
+        case_dir = self.root / "evals" / "cases" / manifest["id"]
+        case_dir.mkdir(parents=True)
+        (case_dir / "case.json").write_text(json.dumps(manifest), encoding="utf-8")
+        (case_dir / "prompt.md").write_text("Fix the subject.\n", encoding="utf-8")
+        return case_dir
+
+    def write_skill_entrypoint(self, name, size):
+        entrypoint = self.root / "skills" / name / "SKILL.md"
+        entrypoint.parent.mkdir(parents=True, exist_ok=True)
+        entrypoint.write_bytes(b"x" * size)
+        return entrypoint
+
+    def test_allows_skill_entrypoint_at_exact_utf8_byte_limit(self):
+        self.write_skill_entrypoint("exact-limit", 8_000)
+
+        validate_skill_entrypoint_sizes(self.root)
+
+    def test_reports_every_skill_entrypoint_over_utf8_byte_limit(self):
+        self.write_skill_entrypoint("too-large", 8_001)
+        self.write_skill_entrypoint("also-too-large", 9_999)
+
+        with self.assertRaisesRegex(
+            CaseValidationError,
+            r"(?s)skills/also-too-large/SKILL.md: 9999 bytes \(maximum 8000\).*"
+            r"skills/too-large/SKILL.md: 8001 bytes \(maximum 8000\)",
+        ):
+            validate_skill_entrypoint_sizes(self.root)
+
+    def test_loads_a_valid_case_through_the_manifest_contract(self):
+        case_dir = self.write_case(valid_manifest())
+
+        case = load_case(case_dir / "case.json", self.root)
+
+        self.assertEqual("compose-state-authoring-direct", case.id)
+        self.assertEqual(("compose-state-and-effects",), case.expected_skills)
+        self.assertEqual(("compose-state-and-effects",), case.allowed_skills)
+        self.assertFalse(case.calibration)
+        self.assertFalse(case.automatic_no_skill_control)
+        self.assertEqual("Fix the subject.\n", case.prompt)
+
+    def test_allows_a_no_skill_automatic_control(self):
+        case_dir = self.write_case(valid_manifest(automatic_no_skill_control=True))
+
+        case = load_case(case_dir / "case.json", self.root)
+
+        self.assertTrue(case.automatic_no_skill_control)
+
+    def test_requires_automatic_no_skill_control_to_be_boolean(self):
+        case_dir = self.write_case(valid_manifest(automatic_no_skill_control="yes"))
+
+        with self.assertRaisesRegex(
+            CaseValidationError, "automatic_no_skill_control must be a boolean"
+        ):
+            load_case(case_dir / "case.json", self.root)
+
+    def test_allowed_skills_must_include_every_expected_skill(self):
+        case_dir = self.write_case(
+            valid_manifest(
+                allowed_skills=[],
+            )
+        )
+
+        with self.assertRaisesRegex(
+            CaseValidationError, "allowed_skills must include expected_skills"
+        ):
+            load_case(case_dir / "case.json", self.root)
+
+    def test_requires_calibration_marker_to_be_boolean(self):
+        case_dir = self.write_case(valid_manifest(calibration="yes"))
+
+        with self.assertRaisesRegex(CaseValidationError, "calibration must be a boolean"):
+            load_case(case_dir / "case.json", self.root)
+
+    def test_rejects_validator_paths_that_escape_the_case_contract(self):
+        for argv in (["../check.py"], ["/tmp/check.py"]):
+            with self.subTest(argv=argv):
+                case_dir = self.write_case(
+                    valid_manifest(
+                        id="unsafe-" + str(len(argv[0])),
+                        validators=[{"argv": argv, "timeout_seconds": 30}],
+                    )
+                )
+
+                with self.assertRaisesRegex(CaseValidationError, "validator argv"):
+                    load_case(case_dir / "case.json", self.root)
+
+    def test_rejects_mutable_or_ambiguous_historical_provenance(self):
+        historical = {
+            "kind": "historical",
+            "source_url": "https://github.com/example/project",
+            "revision": "main",
+            "license": "Apache-2.0",
+            "normalization_note": "Package only",
+        }
+        case_dir = self.write_case(
+            valid_manifest(id="historical-case", provenance=historical)
+        )
+
+        with self.assertRaisesRegex(CaseValidationError, "full lowercase Git SHA"):
+            load_case(case_dir / "case.json", self.root)
+
+    def test_reports_incomplete_corpus_without_weakening_strict_validation(self):
+        self.write_case(valid_manifest())
+
+        report = validate_corpus(self.root, allow_incomplete=True)
+
+        self.assertEqual(1, report.case_count)
+        self.assertIn("compose-state-hoisting", "\n".join(report.missing_coverage))
+        with self.assertRaisesRegex(CaseValidationError, "corpus coverage"):
+            validate_corpus(self.root)
+
+
+if __name__ == "__main__":
+    unittest.main()

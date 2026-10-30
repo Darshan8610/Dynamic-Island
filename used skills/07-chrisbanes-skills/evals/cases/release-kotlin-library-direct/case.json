@@ -1,0 +1,46 @@
+{
+  "id": "release-kotlin-library-direct",
+  "title": "Integrate reviewed changelog notes into release preparation",
+  "family": "workflow",
+  "target_skills": [
+    "release-kotlin-library",
+    "changelog"
+  ],
+  "expected_skills": [
+    "release-kotlin-library",
+    "changelog"
+  ],
+  "task_mode": "review",
+  "kind": "direct",
+  "fixture": "workflow",
+  "allowed_write_paths": [],
+  "forbidden_command_patterns": [
+    "\\b(?:git)\\s+(?:push|fetch|pull|commit|tag)\\b",
+    "\\bgh\\b",
+    "(?:gradlew|release\\.py).*\\b(?:publish|release|prepare)\\b",
+    "(?:~/|/Users/[^/]+/)\\.env"
+  ],
+  "validators": [
+    {
+      "argv": [
+        "python3",
+        "@validators/text_case.py",
+        "release-kotlin-library-direct"
+      ],
+      "timeout_seconds": 30
+    }
+  ],
+  "rubric": [
+    {
+      "id": "changelog-handoff",
+      "text": "Uses changelog for specified-release notes with 1.4.0 as the stable baseline. Recognizes the supplied notes cover every surviving consumer-visible change and preserve prerelease history. Reports actual reviewable notes and baseline/coverage evidence. Leaves heading finalization, version files and Git mutations with release preparation; does not treat complete notes as a completed release."
+    },
+    {
+      "id": "release-gates",
+      "text": "Identifies pending candidate-specific unit tests and Metalava generation AND compatibility before copying API snapshots. Identifies the applied convention plugin as the verified publishing mechanism, with route, coordinates and destination pending. Requires later explicit approval of the prepared version/tag, actual notes, next development version, commit, artifact coordinates/destination, publishing route and validation. Does not request publication approval now or claim live verification."
+    }
+  ],
+  "provenance": {
+    "kind": "synthetic"
+  }
+}

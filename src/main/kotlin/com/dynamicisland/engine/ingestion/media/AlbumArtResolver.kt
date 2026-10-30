@@ -246,5 +246,49 @@ internal class AlbumArtResolver(context: Context) {
                 Bitmap.createScaledBitmap(bitmap, targetW, targetH, true)
             }.getOrNull() ?: bitmap
         }
+
+        /**
+         * Samples an album cover [bitmap] to extract its dominant vibrant color tone as a `#RRGGBB` hex string
+         * for adaptive `AudioWaveform` bars and `.keylineTint` perimeter borders.
+         */
+        fun extractDominantVibrantHex(bitmap: Bitmap?): String {
+            if (bitmap == null || bitmap.width <= 0 || bitmap.height <= 0) return "#1DB954"
+            return runCatching {
+                val stepX = (bitmap.width / 8).coerceAtLeast(1)
+                val stepY = (bitmap.height / 8).coerceAtLeast(1)
+                var bestR = 29
+                var bestG = 185
+                var bestB = 84
+                var bestScore = -1f
+                var y = stepY / 2
+                while (y < bitmap.height) {
+                    var x = stepX / 2
+                    while (x < bitmap.width) {
+                        val pixel = bitmap.getPixel(x, y)
+                        val r = (pixel shr 16) and 0xFF
+                        val g = (pixel shr 8) and 0xFF
+                        val b = pixel and 0xFF
+                        val maxC = maxOf(r, g, b)
+                        val minC = minOf(r, g, b)
+                        val delta = maxC - minC
+                        val luma = (r * 299 + g * 587 + b * 114) / 1000
+                        // Prefer saturated, mid-to-high luminance tones that stand out against a black capsule
+                        if (luma in 45..235 && delta >= 24) {
+                            val saturation = delta.toFloat() / maxC.coerceAtLeast(1).toFloat()
+                            val score = saturation * 100f + (1f - kotlin.math.abs(luma - 150) / 150f) * 40f
+                            if (score > bestScore) {
+                                bestScore = score
+                                bestR = r
+                                bestG = g
+                                bestB = b
+                            }
+                        }
+                        x += stepX
+                    }
+                    y += stepY
+                }
+                String.format("#%02X%02X%02X", bestR, bestG, bestB)
+            }.getOrDefault("#1DB954")
+        }
     }
 }

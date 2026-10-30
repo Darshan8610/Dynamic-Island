@@ -1,0 +1,390 @@
+![Abstract illustration of a modular Kotlin and Jetpack Compose toolkit](docs/assets/skills-header.webp)
+
+# Skills
+
+A set of skills for Kotlin, Jetpack Compose, Android development, and grounded
+writing.
+
+The repository is also a portable [Agent Plugins](https://agent-plugins.org/)
+v1.0.0 package. Conforming clients discover the root [`plugin.json`](plugin.json)
+and the immediate skill directories under [`skills/`](skills/).
+
+## Install
+
+With the [skills CLI](https://skills.sh):
+
+```
+npx skills add chrisbanes/skills
+```
+
+Or install as a Claude Code plugin:
+
+```
+/plugin marketplace add chrisbanes/skills
+/plugin install chrisbanes-skills@chrisbanes-skills
+```
+
+Or install as a Codex plugin:
+
+```
+codex plugin marketplace add chrisbanes/skills --ref main
+codex plugin add chrisbanes-skills@chrisbanes-skills
+```
+
+Or install as an OpenCode V2 plugin (2.0.22 or newer):
+
+```json
+{
+  "plugins": ["chrisbanes-skills@git+https://github.com/chrisbanes/skills.git"]
+}
+```
+
+OpenCode V1 1.18.29 or newer uses `plugin` instead of `plugins`.
+See [`.opencode/INSTALL.md`](.opencode/INSTALL.md) for details.
+
+### External skill providers
+
+Most skills in this repository are self-contained. The workflows below compose
+with skills from other repositories; installing `chrisbanes/skills` does not
+install them, and the workflows never install them implicitly.
+
+| Consumer | Requirement | Provider | Source and install |
+|---|---|---|---|
+| `deliver-spec` GitHub readiness | Conditional | `triage` | [Matt Pocock's skills](https://github.com/mattpocock/skills): `npx skills add mattpocock/skills --skill triage` |
+| [`implement-with-subagents`](skills/implement-with-subagents/SKILL.md) behavior tasks | Conditional | `tdd` at approved test seams | [Matt Pocock's skills](https://github.com/mattpocock/skills): `npx skills add mattpocock/skills --skill tdd` |
+| [`run-github-project`](skills/run-github-project/SKILL.md) explicit/repository-required test-first work | Conditional | `tdd` | [Matt Pocock's skills](https://github.com/mattpocock/skills): `npx skills add mattpocock/skills --skill tdd` |
+| `run-github-project` Todo triage | Conditional | `triage` | [Matt Pocock's skills](https://github.com/mattpocock/skills): `npx skills add mattpocock/skills --skill triage` |
+| `run-github-project` Wayfinder lane | Conditional | `wayfinder`, `research` | [Matt Pocock's skills](https://github.com/mattpocock/skills): use `--skill wayfinder` or `--skill research`; see the [workflow provider matrix](skills/run-github-project/references/workflow-providers.md) |
+
+Delivery and parallel implementation use one fresh independent read-only reviewer
+against the approved source and repository standards; no external review skill
+or issue-tracker setup is required. Reviews include the production paths and
+boundary cases examined and material uncertainty. The authoritative
+[behavioral review and repair procedure](references/behavioral-review.md) covers
+related boundary repairs, sensitive fixture calibration before expansion,
+rendering-consumer tracing, repeated external findings and browser diagnostics.
+`npm run references:sync` supplies identical local copies to its consumers;
+edit the authoritative source, not the copies. The same mechanism supplies
+[to-plan's boundary-validation rule](skills/to-plan/references/boundary-validation.md)
+to implementation consumers.
+
+Delivery and planning select affected existing tests through shared-structure
+consumers and structural audits. Unsettled fixtures establish one sensitive case
+before expanding the acceptance matrix; established fixtures reuse valid evidence.
+
+Review mode in `implement-with-subagents`, and review or setup mode in
+`run-github-project`, do not require these external skills. See the
+[`run-github-project` provider matrix](skills/run-github-project/references/workflow-providers.md)
+for its lane-specific fallback and blocking behavior.
+
+## Skills
+
+### Start here
+
+- Working on Compose state or effects? Start with [`compose-state-and-effects`](skills/compose-state-and-effects/SKILL.md).
+- Investigating recomposition, stability, or jank? Start with [`compose-performance`](skills/compose-performance/SKILL.md).
+- Comparing Android benchmark configurations or a measured Android default? Start with [`android-benchmark-comparison`](skills/android-benchmark-comparison/SKILL.md).
+- Reviewing Flow or coroutine architecture? Start with [`kotlin-concurrency-and-flow`](skills/kotlin-concurrency-and-flow/SKILL.md).
+
+### Routing
+
+- [`using-chrisbanes-skills`](skills/using-chrisbanes-skills/SKILL.md) — route Kotlin and Jetpack Compose work to focused skills, adding a second only for an independent decision in the same change.
+
+### Benchmarking
+
+- [`android-benchmark-comparison`](skills/android-benchmark-comparison/SKILL.md) — compare physical Android benchmark configurations with verified coverage, controlled conditions, trace-backed diagnosis of unstable rankings, and bounded conclusions.
+
+### Jetpack Compose
+
+#### State and side effects
+
+- [`compose-state-and-effects`](skills/compose-state-and-effects/SKILL.md) — decide state ownership and effect lifecycle for local UI state, screen state holders, Flow collection, callbacks, cleanup, navigation, snackbar, analytics, and focus requests.
+
+#### Performance
+
+- [`compose-performance`](skills/compose-performance/SKILL.md) — diagnose stability, deferred reads, composition contracts, and cross-phase back-writing from concrete runtime evidence.
+
+#### UI API design and layout
+
+- [`compose-component-design`](skills/compose-component-design/SKILL.md) — design caller-placeable Compose APIs whose variable visual regions are caller-provided slots.
+- [`compose-animations`](skills/compose-animations/SKILL.md) — choose Compose animation APIs for visibility, value targets, coordinated transitions, and content swaps; align with official quick guide and decision tree.
+- [`compose-focus-navigation`](skills/compose-focus-navigation/SKILL.md) — design and test keyboard, TV, D-pad, and focus-first Compose navigation behavior.
+
+#### Testing
+
+- [`compose-ui-testing-patterns`](skills/compose-ui-testing-patterns/SKILL.md) — choose between plain UI tests, semantics assertions, key/focus tests, interaction state tests with MutableInteractionSource, screenshot tests, and integration tests.
+
+### Kotlin
+
+- [`kotlin-concurrency-and-flow`](skills/kotlin-concurrency-and-flow/SKILL.md) — review coroutine, raw `Thread`, and `Executor` ownership, cancellation, Flow state/event modeling, sharing, replay, and one-shot delivery.
+- [`kotlin-control-flow`](skills/kotlin-control-flow/SKILL.md) — write and review Kotlin branching with subject `when`, guard conditions, sealed exhaustiveness, smart casts, nullable branching, and early returns.
+- [`kotlin-api-design`](skills/kotlin-api-design/SKILL.md) — choose function owners, semantic domain types, and Kotlin Multiplatform platform boundaries.
+
+### Writing
+
+- [`changelog`](skills/changelog/SKILL.md) — reconcile Unreleased or specified-release notes with verified history, issue/PR links and contributor credit; preserve curated text and prerelease history across languages and publishing systems.
+- [`grounded-writing`](skills/grounded-writing/SKILL.md) — draft or review public developer documentation and other user-owned text using Chris Banes’s writing as the sole style model, including internal report reviews, while preserving evidence, format, review-only authority, and material-edit restraint.
+
+### Workflows
+
+- [`deliver-spec`](skills/deliver-spec/SKILL.md) — coordinate one approved spec or verified Project-controller handoff through solo or justified delegated implementation, a planning-free fast path for small well-understood tickets, CI-supplied full-suite evidence, concurrent external review with verified draft support or earlier PR readiness, reusable scope approval and evidence, independent integrated-candidate review and focused repair review, and PR shepherding; validate applicable live-qualification harness paths offline (isolated production stores for persistent paths, fake runtimes for asynchronous paths), then reconcile failures under bounded approved allowances.
+- [`release-kotlin-library`](skills/release-kotlin-library/SKILL.md) — assess readiness, prepare, and verify Kotlin library releases; check the `gradle-maven-publish-plugin` prerequisite, use `changelog` for notes, prepare Metalava API snapshots, and follow repository checks and publication gates.
+- [`gradle-run`](skills/gradle-run/SKILL.md) — run every agent-initiated Gradle command through a compact-output wrapper; recover run identity and bounded results by workflow ID with read-only status, and diagnose failures with optional investigation helpers.
+- [`implement-with-subagents`](skills/implement-with-subagents/SKILL.md) — choose solo implementation for a single item or serial graph and worker ownership for every item in a graph with parallel work; preserve dependency-aware integration, independent final review, same-owner repair, bounded checkout reuse, and read-only orchestration review.
+- [`to-plan`](skills/to-plan/SKILL.md) — create risk-scaled implementation plans that prove baselines from green CI, with observable slices and consequential boundary validation before dependent work, plus authenticated integration amendments and explicit consumer handoffs; decide separate PRs by coherent deliverable boundaries.
+- [`run-github-project`](skills/run-github-project/SKILL.md) — set up, review, or operate a repository's GitHub Project workflow with current-column authorization, human-only Backlog promotion, and deterministic configured agent selection; deliver ordinary implementation tickets through `deliver-spec`, resolve run-level merging once at startup with a 60-second default-no question unless already specified, preflight offline live-qualification harness evidence, preserve asynchronous or persistent failures in durable checkpoints, prioritize active delivery through safe planner checkpoints, fast-path small Todo tickets straight into implementation, start external review while CI runs after local qualification, free slots while reviewed PRs wait on CI, record ticket-local pauses while independent work continues, and keep `drain` alive under a read-only Project Watcher instead of returning at the first human wait.
+- [`shepherd`](skills/shepherd/SKILL.md) — poll open PRs and MRs directly in the controller, using a read-only helper only for a bounded large failed-log question, or follow a host PR monitor's wake events (such as Claude desktop's Auto-fix) instead of polling, triage review comments, and repair CI failures with affected checks and required integrated-candidate validation; start external review during CI while retaining final-head merge gates.
+
+For selective skill installations, install `changelog` alongside
+`release-kotlin-library`; the full plugin includes both.
+
+Workflows that delegate agents share the [subagent selection and handoff
+reference](references/subagent-selection.md). Each workflow retains its own
+delegation trigger, authority, and acceptance rules. Each consuming skill also
+contains a copy of the reference for standalone installation.
+`deliver-spec` bundles its own solo-or-delegated implementation procedure;
+`implement-with-subagents` chooses solo or delegated ownership once from the
+whole task graph.
+
+Planning and drain admission distinguish behavioral prerequisites, shared-file
+mutation conflicts and final integration requirements. Plan-proven independent
+preparation needs explicit slice ownership, permitted paths/resources, focused
+checks and a stop before shared edits; native blockers, accepted-plan ordering,
+resource grants and final integrated validation still apply.
+
+Edit `references/subagent-selection.md`, then run
+`npm run references:sync` and include the updated bundled copies in the change.
+Run `npm run build` to check that all copies are regular files matching their
+sources; it fails on drift without rewriting files.
+
+### Migration from pre-cluster skills
+
+This is a breaking taxonomy change. Replace the removed entrypoints as follows:
+
+| Removed skills | Replacement |
+|---|---|
+| `compose-state-authoring`, `compose-state-hoisting`, `compose-side-effects` | [`compose-state-and-effects`](skills/compose-state-and-effects/SKILL.md) |
+| `compose-recomposition-performance`, `compose-stability-diagnostics`, `compose-state-deferred-reads` | [`compose-performance`](skills/compose-performance/SKILL.md) |
+| `compose-modifier-and-layout-style`, `compose-slot-api-pattern` | [`compose-component-design`](skills/compose-component-design/SKILL.md) |
+| `kotlin-coroutines-structured-concurrency`, `kotlin-flow-state-event-modeling` | [`kotlin-concurrency-and-flow`](skills/kotlin-concurrency-and-flow/SKILL.md) |
+| `kotlin-functions`, `kotlin-types-value-class`, `kotlin-multiplatform-expect-actual` | [`kotlin-api-design`](skills/kotlin-api-design/SKILL.md) |
+
+## Contributing
+
+Skills live at `skills/<skill-name>/SKILL.md`, flat (no language nesting). The `name:` in the SKILL.md frontmatter must match the directory name.
+
+Frontmatter is validated against [`skills.schema.json`](skills.schema.json), which
+tracks the core [Agent Skills specification](https://agentskills.io/specification)
+and permits `disable-model-invocation` for Claude Code compatibility.
+`name` and `description` are required; portable optional fields are `license`,
+`compatibility`, `metadata`, and `allowed-tools`. Explicit-only workflow skills
+also mirror that policy in Codex's `agents/openai.yaml`.
+
+### Releases
+
+Release versions use CalVer: `YYYY.M.D`, `YYYY.M.D.N`, or `YYYY.M.D.NN`, without
+zero-padded month or day values. For example, use `2026.6.17` for the first
+release of the day and `2026.6.17.1` or `2026.6.17.01` for another release.
+Single-digit daily release numbers are normalized to the padded form, so both
+inputs produce `2026.6.17.01`.
+
+Keep root `plugin.json`, `.claude-plugin/plugin.json`,
+`.codex-plugin/plugin.json`, and new Git release tags on the same version.
+Existing zero-padded tags from before this policy map to the non-padded manifest
+version, so `2026.06.16` maps to `2026.6.16`. Only bump versions when publishing
+an installable release.
+
+To publish a release, run the **Release** workflow from GitHub Actions. Leave the
+version input empty to choose today's next unused UTC version, or provide a specific
+CalVer value, optionally with a one- or two-digit daily release number. Use the
+dry-run option to validate without creating a commit, tag, or GitHub release.
+Automatic numbering checks existing tags and releases: the first release uses
+`YYYY.M.D`, then subsequent releases increment the highest daily suffix through
+`.99`. Gaps are not reused. If all daily numbers are exhausted, the workflow
+fails and requires an explicit version or a release on another day.
+
+The same workflow also runs nightly (02:17 UTC). It releases only if `skills/`,
+the plugin manifests, `.opencode/`, `.agents/`, `plugin.json`, or `package.json`
+changed since the latest tag; otherwise it exits without a release.
+
+Before pushing, lint skills (frontmatter schema + markdown):
+
+```
+npm install
+npm run lint
+```
+
+This also runs on CI for all PRs.
+
+For a taxonomy change, also run the durable
+[cluster behavior evaluation](tests/cluster-behavior.md). It checks routing,
+required references, safeguards, exceptions, and finish gates at the public
+agent-facing seam.
+
+Before publishing a release, manually run the advisory evaluations for the
+changed skills. Select each affected suite; when shared evaluation machinery
+changes, include every suite affected by that change. Preview each suite with
+the intended filters and current subject and judge cost assumptions:
+
+```sh
+python3 evals/run.py plan \
+  --suite <suite> \
+  --skill <changed-skill> \
+  --model <model> \
+  --reasoning <effort> \
+  --judge-model <judge-model> \
+  --judge-reasoning <effort> \
+  --subject-cost-per-call-usd <amount> \
+  --judge-cost-per-call-usd <amount> \
+  --json
+```
+
+Repeat `--skill` for each changed skill. Without a `--case` filter, omitting
+`--skill` selects all non-calibration cases in the suite. Calibration cases are
+excluded unless you pass their explicit IDs with `--case`. Inspect `case_ids` in
+the JSON output and confirm the selected cases match the intended scope before
+reviewing call counts and estimated cost. The `plan` preview includes only the
+counts and cost for first attempts. Execution may automatically retry each
+subject and judge call once. Before `--execute`, get explicit cost approval for
+up to twice the previewed subject calls, judge calls, and estimated cost, to
+cover one retry per call. Execute the matching `run` command manually. Report
+invalid or inconclusive results. Before any rerun, preview again, inspect its
+`case_ids`, review the calls and cost, and get new approval for the same retry
+headroom. Results remain advisory, not release gates. See
+[`evals/README.md`](evals/README.md) for suite selection and command options.
+
+## Evaluating skills
+
+The advisory evaluator tests concrete scenarios modelled on real-world coding
+work, with expected outcomes and no-change controls. It compares no-skill,
+forced-skill, and automatic-routing runs. **Baseline** and **automatic** use
+the cases eligible for automatic activation; **restraint** checks that a skill
+does not make an unnecessary change. Scorecards also compare subject-side tokens,
+tool calls, completed turns, elapsed time, and total attempted work per
+successful outcome. The
+table reports the latest available result for each skill and correctness metric.
+These scores were produced using
+[`gpt-6-luna`](https://developers.openai.com/api/docs/models/gpt-6-luna)
+with high reasoning, judged by
+[`gpt-6-sol`](https://developers.openai.com/api/docs/models/gpt-6-sol) with
+high reasoning. Results are model- and reasoning-specific; other configurations
+may perform differently. The human audit queue remains open. These are not merge
+or release gates. The subject and judge each run on Codex by default, or on
+Claude Code with `--runtime claude` and `--judge-runtime claude`; Claude runs need
+an `--output-dir` outside the repository. See
+[`evals/README.md`](evals/README.md) for evaluation setup and reproducibility.
+
+Skill-revision compatibility checks compare old and revised instructions within
+each model, separately from these benchmark scores. See the
+[workflow compatibility record](evals/artifacts/2026-09-06-workflow-model-compatibility.md)
+for Astra and 5.6 coverage and its current evidence limits.
+
+| Skill | Baseline | Automatic | Restraint |
+| --- | ---: | ---: | ---: |
+| [`compose-animations`](skills/compose-animations/SKILL.md) | 75.0% | 100.0% | 100.0% |
+| [`compose-component-design`](skills/compose-component-design/SKILL.md) | 86.7% | 100.0% | 100.0% |
+| [`compose-focus-navigation`](skills/compose-focus-navigation/SKILL.md) | 33.3% | 100.0% | 100.0% |
+| [`compose-performance`](skills/compose-performance/SKILL.md) | 83.3% | 100.0% | 100.0% |
+| [`compose-state-and-effects`](skills/compose-state-and-effects/SKILL.md) | 83.3% | 100.0% | 100.0% |
+| [`compose-ui-testing-patterns`](skills/compose-ui-testing-patterns/SKILL.md) | 55.6% | 100.0% | 100.0% |
+| [`gradle-run`](skills/gradle-run/SKILL.md) | 41.7% | 100.0% | 100.0% |
+| [`kotlin-api-design`](skills/kotlin-api-design/SKILL.md) | 58.3% | 100.0% | 100.0% |
+| [`kotlin-concurrency-and-flow`](skills/kotlin-concurrency-and-flow/SKILL.md) | 44.4% | 100.0% | 100.0% |
+| [`kotlin-control-flow`](skills/kotlin-control-flow/SKILL.md) | 33.3% | 100.0% | 100.0% |
+| [`android-benchmark-comparison`](skills/android-benchmark-comparison/SKILL.md) | 33.3% | 100.0% | 100.0% |
+| [`deliver-spec`](skills/deliver-spec/SKILL.md) | — | — | — |
+| [`grounded-writing`](skills/grounded-writing/SKILL.md) | 0.0% | 100.0% | 100.0% |
+| [`implement-with-subagents`](skills/implement-with-subagents/SKILL.md) | — | — | 100.0% |
+| [`release-kotlin-library`](skills/release-kotlin-library/SKILL.md) | 0.0% | 100.0% | 100.0% |
+| [`run-github-project`](skills/run-github-project/SKILL.md) | — | — | 100.0% |
+| [`shepherd`](skills/shepherd/SKILL.md) | — | — | 100.0% |
+| [`to-plan`](skills/to-plan/SKILL.md) | — | — | 100.0% |
+
+The `android-benchmark-comparison`, `compose-state-and-effects`,
+`compose-ui-testing-patterns`, `gradle-run`, `grounded-writing`, `kotlin-api-design`,
+`kotlin-concurrency-and-flow`, `kotlin-control-flow`, and
+`release-kotlin-library` automatic cells, and the `to-plan` restraint cell,
+use later focused evidence. Baseline and efficiency values use the complete
+suite. The [improvement result record](evals/artifacts/2026-09-24-gpt6-improvement-results.md),
+[targeted probe record](evals/artifacts/2026-09-24-gpt6-targeted-100-probes.md),
+and [inline repair record](evals/artifacts/2026-09-24-gpt6-inline-repair-results.md)
+give provenance and remaining failures.
+
+### Skill efficiency
+
+Values are per-run medians, baseline → automatic, followed by the automatic
+percentage change. These subject-only measurements use the latest complete,
+same-run evidence available for each suite and include failed runs and negative
+controls. Baseline-to-automatic efficiency comparisons use only cases eligible
+for automatic activation. Multi-skill scenarios contribute to every targeted
+skill row. A turn is one completed top-level turn (a Codex `turn.completed` or a
+Claude Code `result`); time remains environment-sensitive.
+Run provenance and local scorecard paths are in the
+[GPT-6 improvement result record](evals/artifacts/2026-09-24-gpt6-improvement-results.md).
+
+| Skill | Tokens / run | Tool calls / run | Turns / run | Time / run |
+| --- | ---: | ---: | ---: | ---: |
+| [`compose-animations`](skills/compose-animations/SKILL.md) | 58.6k → 85.4k (+46%) | 4 → 5 (+25%) | 1 → 1 (+0%) | 28.2s → 34.8s (+23%) |
+| [`compose-component-design`](skills/compose-component-design/SKILL.md) | 48.7k → 73.4k (+51%) | 4 → 5 (+25%) | 1 → 1 (+0%) | 24.4s → 29.5s (+21%) |
+| [`compose-focus-navigation`](skills/compose-focus-navigation/SKILL.md) | 59.1k → 84.9k (+44%) | 5 → 5 (+0%) | 1 → 1 (+0%) | 28.9s → 36.6s (+27%) |
+| [`compose-performance`](skills/compose-performance/SKILL.md) | 49.1k → 85.0k (+73%) | 4 → 5 (+25%) | 1 → 1 (+0%) | 26.4s → 31.8s (+21%) |
+| [`compose-state-and-effects`](skills/compose-state-and-effects/SKILL.md) | 60.1k → 89.0k (+48%) | 4 → 5 (+25%) | 1 → 1 (+0%) | 28.2s → 37.8s (+34%) |
+| [`compose-ui-testing-patterns`](skills/compose-ui-testing-patterns/SKILL.md) | 60.2k → 84.2k (+40%) | 5.5 → 5 (-9%) | 1 → 1 (+0%) | 27.1s → 26.8s (-1%) |
+| [`gradle-run`](skills/gradle-run/SKILL.md) | 59.8k → 104.3k (+75%) | 4 → 7 (+75%) | 1 → 1 (+0%) | 27.6s → 45.3s (+64%) |
+| [`kotlin-api-design`](skills/kotlin-api-design/SKILL.md) | 60.1k → 83.9k (+40%) | 4 → 5 (+25%) | 1 → 1 (+0%) | 32.8s → 38.8s (+18%) |
+| [`kotlin-concurrency-and-flow`](skills/kotlin-concurrency-and-flow/SKILL.md) | 60.0k → 74.0k (+23%) | 4 → 5 (+25%) | 1 → 1 (+0%) | 26.5s → 28.0s (+6%) |
+| [`kotlin-control-flow`](skills/kotlin-control-flow/SKILL.md) | 60.9k → 83.9k (+38%) | 5 → 5 (+0%) | 1 → 1 (+0%) | 26.2s → 38.5s (+47%) |
+| [`android-benchmark-comparison`](skills/android-benchmark-comparison/SKILL.md) | 46.9k → 53.8k (+15%) | 3 → 3 (+0%) | 1 → 1 (+0%) | 23.2s → 35.0s (+51%) |
+| [`grounded-writing`](skills/grounded-writing/SKILL.md) | 35.6k → 56.9k (+60%) | 2 → 4 (+100%) | 1 → 1 (+0%) | 23.2s → 22.1s (-5%) |
+| [`release-kotlin-library`](skills/release-kotlin-library/SKILL.md) | 70.2k → 88.3k (+26%) | 4 → 5 (+25%) | 1 → 1 (+0%) | 42.1s → 43.9s (+4%) |
+
+### Claude Code
+
+Claude Code: `claude-haiku-5-5` with high effort, judged by `claude-sonnet-5-5` with high
+effort on Claude Code. The metrics are defined as above, and `—` marks a cell with no
+recorded result. Run provenance and scorecards are in the
+[Claude Code result record](evals/artifacts/2026-10-19-claude-haiku-5-5-sonnet-judge-results.md).
+
+| Skill | Baseline | Automatic | Restraint |
+| --- | ---: | ---: | ---: |
+| [`compose-animations`](skills/compose-animations/SKILL.md) | 91.7% | 100.0% | 100.0% |
+| [`compose-component-design`](skills/compose-component-design/SKILL.md) | 86.7% | 100.0% | 100.0% |
+| [`compose-focus-navigation`](skills/compose-focus-navigation/SKILL.md) | 100.0% | 100.0% | 100.0% |
+| [`compose-performance`](skills/compose-performance/SKILL.md) | 91.7% | 100.0% | 100.0% |
+| [`compose-state-and-effects`](skills/compose-state-and-effects/SKILL.md) | 79.2% | 95.8% | 100.0% |
+| [`compose-ui-testing-patterns`](skills/compose-ui-testing-patterns/SKILL.md) | 88.9% | 100.0% | 100.0% |
+| [`gradle-run`](skills/gradle-run/SKILL.md) | 16.7% | 83.3% | 100.0% |
+| [`kotlin-api-design`](skills/kotlin-api-design/SKILL.md) | 91.7% | 91.7% | 100.0% |
+| [`kotlin-concurrency-and-flow`](skills/kotlin-concurrency-and-flow/SKILL.md) | 72.2% | 100.0% | 100.0% |
+| [`kotlin-control-flow`](skills/kotlin-control-flow/SKILL.md) | 61.1% | 94.4% | 100.0% |
+| [`android-benchmark-comparison`](skills/android-benchmark-comparison/SKILL.md) | 33.3% | 100.0% | 100.0% |
+| [`deliver-spec`](skills/deliver-spec/SKILL.md) | — | — | 100.0% |
+| [`grounded-writing`](skills/grounded-writing/SKILL.md) | 0.0% | 100.0% | 100.0% |
+| [`implement-with-subagents`](skills/implement-with-subagents/SKILL.md) | — | — | 100.0% |
+| [`release-kotlin-library`](skills/release-kotlin-library/SKILL.md) | 16.7% | 100.0% | 100.0% |
+| [`run-github-project`](skills/run-github-project/SKILL.md) | — | — | 100.0% |
+| [`shepherd`](skills/shepherd/SKILL.md) | — | — | 100.0% |
+| [`to-plan`](skills/to-plan/SKILL.md) | 16.7% | 100.0% | 100.0% |
+
+Per-run medians, baseline → automatic, for the same configuration:
+
+| Skill | Tokens / run | Tool calls / run | Turns / run | Time / run |
+| --- | ---: | ---: | ---: | ---: |
+| [`compose-animations`](skills/compose-animations/SKILL.md) | 51.8k → 85.9k (+66%) | 6 → 8 (+33%) | 1 → 1 (+0%) | 47.7s → 46.4s (-3%) |
+| [`compose-component-design`](skills/compose-component-design/SKILL.md) | 52.2k → 72.8k (+40%) | 6 → 6 (+0%) | 1 → 1 (+0%) | 30.2s → 35.2s (+16%) |
+| [`compose-focus-navigation`](skills/compose-focus-navigation/SKILL.md) | 62.2k → 88.9k (+43%) | 7.5 → 8 (+7%) | 1 → 1 (+0%) | 44.6s → 56.9s (+27%) |
+| [`compose-performance`](skills/compose-performance/SKILL.md) | 94.3k → 103.8k (+10%) | 8 → 9 (+12%) | 1 → 1 (+0%) | 45.0s → 51.3s (+14%) |
+| [`compose-state-and-effects`](skills/compose-state-and-effects/SKILL.md) | 72.4k → 118.4k (+64%) | 7 → 9 (+29%) | 1 → 1 (+0%) | 39.4s → 51.3s (+30%) |
+| [`compose-ui-testing-patterns`](skills/compose-ui-testing-patterns/SKILL.md) | 87.0k → 88.3k (+2%) | 10 → 8 (-20%) | 1 → 1 (+0%) | 39.3s → 44.7s (+13%) |
+| [`gradle-run`](skills/gradle-run/SKILL.md) | 75.6k → 105.6k (+40%) | 6 → 5 (-17%) | 1 → 1 (+0%) | 36.3s → 29.9s (-18%) |
+| [`kotlin-api-design`](skills/kotlin-api-design/SKILL.md) | 96.7k → 101.8k (+5%) | 8 → 9 (+12%) | 1 → 1 (+0%) | 45.4s → 53.5s (+18%) |
+| [`kotlin-concurrency-and-flow`](skills/kotlin-concurrency-and-flow/SKILL.md) | 111.2k → 145.2k (+31%) | 9.5 → 10 (+5%) | 1 → 1 (+0%) | 47.1s → 50.4s (+7%) |
+| [`kotlin-control-flow`](skills/kotlin-control-flow/SKILL.md) | 119.5k → 138.1k (+16%) | 10 → 10 (+0%) | 1 → 1 (+0%) | 41.3s → 44.1s (+7%) |
+| [`android-benchmark-comparison`](skills/android-benchmark-comparison/SKILL.md) | 37.7k → 66.3k (+76%) | 3 → 3 (+0%) | 1 → 1 (+0%) | 22.0s → 22.6s (+3%) |
+| [`grounded-writing`](skills/grounded-writing/SKILL.md) | 46.6k → 73.6k (+58%) | 3 → 5 (+67%) | 1 → 1 (+0%) | 19.2s → 28.3s (+47%) |
+| [`release-kotlin-library`](skills/release-kotlin-library/SKILL.md) | 55.5k → 60.7k (+9%) | 5 → 3 (-40%) | 1 → 1 (+0%) | 43.6s → 54.9s (+26%) |
+| [`to-plan`](skills/to-plan/SKILL.md) | 22.9k → 53.4k (+133%) | 2 → 4 (+100%) | 1 → 1 (+0%) | 9.4s → 21.8s (+132%) |
+
+## License
+
+[Apache 2.0](LICENSE)

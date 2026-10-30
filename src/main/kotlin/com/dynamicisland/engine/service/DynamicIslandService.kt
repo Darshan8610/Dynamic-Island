@@ -257,7 +257,8 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
                         options = options, onGesture = { routeGesture(it,false) },
                         cornerRadius = androidx.compose.ui.unit.Dp(windowCorner),
                         microphoneActive = microphoneActive,
-                        cameraActive = cameraActive)
+                        cameraActive = cameraActive,
+                        isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
                     // Removing this subtree immediately on lock avoids retaining private content
                     // during an exit animation. Re-targeting visibility cancels any entrance.
                     if (!locked) AnimatedVisibility(visible = panelVisible,
@@ -269,7 +270,8 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
                             onPlayPause = ::playPause, onNext = ::next, onPrevious = ::previous,
                             onSeek = ::seek, onCommand = ::command,
                             onAnswer = ::answer, onHangup = ::hangup, onMute = ::toggleMute,
-                            onSpeaker = ::toggleSpeaker, actionStatus = status)
+                            onSpeaker = ::toggleSpeaker, actionStatus = status,
+                            options = options)
                     }
                     if (panelVisible && !locked && (microphoneActive || cameraActive)) {
                         val privacyColor = when {
@@ -353,6 +355,8 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
             GestureAction.PLAY_PAUSE -> if(_playback.value.canPlayPause) playPause()
             GestureAction.NEXT_TRACK -> if(_playback.value.canNext) next()
             GestureAction.PREVIOUS_TRACK -> if(_playback.value.canPrevious) previous()
+            GestureAction.CYCLE_ACTIVITY -> command(IslandUserCommand.CycleActivityFocus(1))
+            GestureAction.DISMISS_ALERT -> command(IslandUserCommand.DismissAlertPeek)
             GestureAction.NONE -> Unit
         }
     }
@@ -426,10 +430,17 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
             maxOf(top, cutout?.safeInsetTop ?: 0), BehaviorPreferences.get(this).options.value.clearSystemBars,
             maxOf(safeLeft, cutout?.safeInsetLeft ?: 0), maxOf(safeRight, cutout?.safeInsetRight ?: 0),
             maxOf(bottom, cutout?.safeInsetBottom ?: 0))
-        return if (!expanded) compact else ExpandedAnchor.resolve(compact, width, height,
+        val rawWindow = if (!expanded) compact else ExpandedAnchor.resolve(compact, width, height,
             metrics.density, overlayContext.resources.configuration.fontScale,
             maxOf(top, cutout?.safeInsetTop ?: 0), maxOf(bottom, cutout?.safeInsetBottom ?: 0),
             maxOf(safeLeft, cutout?.safeInsetLeft ?: 0), maxOf(safeRight, cutout?.safeInsetRight ?: 0))
+        return ExpandedRegionLayoutSolver.resolvePostureWindow(
+            candidate = rawWindow,
+            screenWidthPx = width,
+            screenHeightPx = height,
+            posture = BehaviorPreferences.get(this).options.value.devicePosture,
+            reservedCrease = null
+        )
     }
 
     private fun updateWindow(animate: Boolean = true) {

@@ -59,7 +59,10 @@ class DynamicIslandNotificationListener : NotificationListenerService() {
             "alarm",
             "stopwatch",
             "progress",
-            "workout"
+            "workout",
+            "transport_journey",
+            "status",
+            "service"
         )
 
         @Volatile
@@ -537,6 +540,7 @@ class DynamicIslandNotificationListener : NotificationListenerService() {
                 postedAtMillis = sbn.postTime,
                 groupKey = sbn.groupKey.takeIf { sbn.isGroup },
                 importance = importance,
+                isProgressStyle = LiveUpdateProgressParser.isAndroid16ProgressStyle(notification),
                 appLabel = runCatching {
                     packageManager.getApplicationLabel(packageManager.getApplicationInfo(sbn.packageName, 0)).toString()
                 }.getOrNull()

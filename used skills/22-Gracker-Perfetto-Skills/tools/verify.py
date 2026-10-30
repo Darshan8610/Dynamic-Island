@@ -1,0 +1,281 @@
+#!/usr/bin/env python3
+"""Run independent Perfetto-Skills verification or a scoped development check."""
+
+from __future__ import annotations
+
+import argparse
+from collections.abc import Mapping
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import re
+
+try:
+    from tools.download_fixture_pack import download_pack
+    from tools.fixture_manifest import load_manifest, sha256_file
+except ModuleNotFoundError:  # Direct script execution.
+    from download_fixture_pack import download_pack
+    from fixture_manifest import load_manifest, sha256_file
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SKILL = ROOT / "skills" / "perfetto-performance-analysis"
+FIXTURE_MANIFEST = ROOT / "fixtures" / "manifest.json"
+FIXTURE_LOCK = ROOT / "upstreams" / "fixture-pack.lock.json"
+
+
+def build_commands(
+    smartperfetto: Path | None = None,
+    *,
+    tier: str = "full",
+    tests: list[str] | None = None,
+) -> list[list[str]]:
+    commands = [
+        [sys.executable, "tools/upstream_locks.py"],
+        [sys.executable, "tools/compile_skill.py", "--check"],
+        # Static only: FixtureManifestTest executes the same owned assertions
+        # against the same processor, and each costs full trace parses.
+        [sys.executable, "tools/validate_all_queries.py"],
+        ["agentskills", "validate", "skills/perfetto-performance-analysis"],
+    ]
+    if tier != "static":
+        test_command = [sys.executable, "-m", "unittest"]
+        if tests:
+            test_command = [sys.executable, "tools/run_selected_tests.py", *tests]
+        else:
+            test_command.extend(["discover", "-s", "tests/unit" if tier == "unit" else "tests"])
+            if tier == "unit":
+                test_command.extend(["-t", "."])
+            test_command.extend(["-p", "test_*.py"])
+        commands.insert(3, test_command)
+    if smartperfetto is not None:
+        commands.extend(
+            [
+                [
+                    sys.executable,
+                    "tools/sync_smartperfetto.py",
+                    "--source",
+                    str(smartperfetto),
+                    "--report-dir",
+                    "test-output/verify-smartperfetto",
+                    "--check",
+                ],
+                [
+                    sys.executable,
+                    "tools/validate_catalog.py",
+                    "--catalog",
+                    "catalog/smartperfetto-export.json",
+                    "--skill-root",
+                    "skills/perfetto-performance-analysis",
+                ],
+            ]
+        )
+    return commands
+
+
+def verification_environment(
+    fixtures: Path,
+    processor: Path,
+    *,
+    tier: str,
+    base: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    fixtures = fixtures.expanduser().resolve()
+    processor = processor.expanduser().resolve()
+    if not fixtures.is_dir():
+        raise FileNotFoundError(f"fixture root is missing: {fixtures}")
+    if not processor.is_file() or not os.access(processor, os.X_OK):
+        raise FileNotFoundError(f"trace processor is not executable: {processor}")
+    environment = dict(os.environ if base is None else base)
+    environment.update(
+        {
+            "PERFETTO_FIXTURE_ROOT": str(fixtures),
+            "PERFETTO_FIXTURE_TIER": tier,
+            "PERFETTO_TRACE_PROCESSOR": str(processor),
+        }
+    )
+    environment.pop("SMARTPERFETTO_TEST_TRACES", None)
+    environment.pop("SMARTPERFETTO_SOURCE", None)
+    return environment
+
+
+def _verify_fixture_root(root: Path, *, offline: bool) -> Path:
+    manifest = load_manifest(FIXTURE_MANIFEST)
+    fixtures = manifest["fixtures"]
+    if offline:
+        fixtures = [
+            fixture
+            for fixture in fixtures
+            if fixture["id"] == "startup-api32-warm-smoke"
+        ]
+    for fixture in fixtures:
+        path = root / fixture["path"]
+        if not path.is_file() or sha256_file(path) != fixture["sha256"]:
+            raise ValueError(f"owned fixture is missing or invalid: {fixture['id']}")
+    return root
+
+
+def resolve_fixture_root(
+    explicit: Path | None,
+    *,
+    offline: bool,
+    cache: Path,
+) -> Path:
+    if offline:
+        return _verify_fixture_root(ROOT / "fixtures", offline=True)
+    if explicit is not None:
+        return _verify_fixture_root(explicit.expanduser().resolve(), offline=False)
+    return download_pack(FIXTURE_LOCK, cache)
+
+
+def resolve_trace_processor(cache: Path) -> Path:
+    configured = os.environ.get("PERFETTO_TRACE_PROCESSOR")
+    if configured:
+        path = Path(configured).expanduser().resolve()
+        if not path.is_file() or not os.access(path, os.X_OK):
+            raise FileNotFoundError(f"trace processor is not executable: {path}")
+        validate_trace_processor(path)
+        return path
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(SKILL / "scripts/bootstrap_trace_processor.py"),
+            "--cache-dir",
+            str(cache),
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    path = Path(completed.stdout.strip()).resolve()
+    validate_trace_processor(path)
+    return path
+
+
+def validate_processor_identity(output: str, lock: dict[str, object]) -> None:
+    version_line = re.search(
+        r"Perfetto (v\d+(?:\.\d+)*)(?:-([0-9a-f]+))? \(([0-9a-f]{40})\)",
+        output,
+    )
+    rpc_line = re.search(r"Trace Processor RPC API version: (\d+)", output)
+    if version_line is None or rpc_line is None:
+        raise ValueError("trace processor did not report version/commit/RPC identity")
+    reported_version = version_line.group(1)
+    reported_revision = version_line.group(2)
+    commit = version_line.group(3)
+    runtime = lock["runtime"]
+    if (
+        reported_version != runtime["reported_version"]
+        or commit != runtime["revision"]
+        or (reported_revision is not None and not commit.startswith(reported_revision))
+    ):
+        raise ValueError("trace processor version or commit differs from lock")
+    if int(rpc_line.group(1)) != runtime["rpc_api_version"]:
+        raise ValueError("trace processor RPC API differs from lock")
+
+
+def validate_trace_processor(path: Path) -> None:
+    lock = json.loads((ROOT / "upstreams/google-perfetto.lock.json").read_text(encoding="utf-8"))
+    completed = subprocess.run(
+        [str(path), "--version"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    validate_processor_identity(completed.stdout, lock)
+
+
+def run(command: list[str], *, env: Mapping[str, str]) -> None:
+    completed = subprocess.run(command, cwd=ROOT, check=False, env=env)
+    if completed.returncode != 0:
+        raise SystemExit(completed.returncode)
+
+
+def main(arguments: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--tier", choices=("static", "unit", "full"), default="full",
+        help="Default full gate; static/unit checks do not prepare real traces or a processor.",
+    )
+    parser.add_argument(
+        "--test", action="append", default=[], metavar="TEST_ID",
+        help="Run a qualified tests.unit/tests.integration module, class or method (repeatable); scoped check only.",
+    )
+    parser.add_argument(
+        "--smartperfetto",
+        type=Path,
+        help="Explicit SmartPerfetto checkout used only for import drift checks.",
+    )
+    parser.add_argument("--fixtures", type=Path, help="Verified owned fixture root.")
+    parser.add_argument("--offline", action="store_true", help="Use only the committed smoke trace.")
+    parser.add_argument(
+        "--fixture-cache",
+        type=Path,
+        default=Path(os.environ.get("PERFETTO_FIXTURE_CACHE", ROOT / ".perfetto-fixtures")),
+    )
+    parser.add_argument(
+        "--processor-cache",
+        type=Path,
+        default=Path.home() / ".cache" / "perfetto-skills",
+    )
+    args = parser.parse_args(arguments)
+    if args.offline and args.fixtures:
+        parser.error("--offline and --fixtures are mutually exclusive")
+    if args.tier != "full" and (args.offline or args.fixtures):
+        parser.error("--offline and --fixtures require --tier full")
+    if args.tier == "static" and args.test:
+        parser.error("--test requires --tier unit or full")
+    for target in args.test:
+        if not re.fullmatch(r"tests\.(?:unit|integration)\.test_\w+(?:\.\w+)*", target):
+            parser.error(f"not a qualified repository test: {target}")
+        if args.tier == "unit" and not target.startswith("tests.unit."):
+            parser.error("integration tests require --tier full")
+    needs_real_traces = args.tier == "full" and (
+        not args.test or any(target.startswith("tests.integration.") for target in args.test)
+    )
+    if not needs_real_traces and (args.offline or args.fixtures):
+        parser.error("fixture options require real-trace test coverage")
+
+    environment = dict(os.environ)
+    for name in (
+        "PERFETTO_FIXTURE_ROOT", "PERFETTO_FIXTURE_TIER", "PERFETTO_TRACE_PROCESSOR",
+        "SMARTPERFETTO_TEST_TRACES", "SMARTPERFETTO_SOURCE",
+    ):
+        environment.pop(name, None)
+    source = args.smartperfetto.expanduser().resolve() if args.smartperfetto else None
+    for command in build_commands(source, tier=args.tier, tests=args.test):
+        if needs_real_traces and (
+            "unittest" in command or "tools/run_selected_tests.py" in command
+        ):
+            processor = resolve_trace_processor(args.processor_cache)
+            fixtures = resolve_fixture_root(
+                args.fixtures, offline=args.offline, cache=args.fixture_cache,
+            )
+            environment = verification_environment(
+                fixtures, processor, tier="offline" if args.offline else "full",
+            )
+        run(command, env=environment)
+    print(
+        json.dumps(
+            {
+                "status": "verified",
+                "verification_tier": args.tier,
+                "complete_gate": args.tier == "full" and not args.offline and not args.test,
+                "tests": args.test or None,
+                "fixture_tier": environment.get("PERFETTO_FIXTURE_TIER"),
+                "fixture_root": environment.get("PERFETTO_FIXTURE_ROOT"),
+                "trace_processor": environment.get("PERFETTO_TRACE_PROCESSOR"),
+                "smartperfetto_sync": str(source) if source else None,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

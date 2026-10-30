@@ -1,6 +1,5 @@
 package com.dynamicisland.engine.core.bus
 
-import android.app.Notification
 import android.app.PendingIntent
 import android.graphics.Bitmap
 import android.net.Uri
@@ -22,7 +21,7 @@ sealed interface SystemIngestionEvent {
         data class PlaybackChanged(
             val packageName: String,
             val isPlaying: Boolean,
-            val playbackState: Int, // PlaybackStateCompat state
+            val playbackState: Int,
             val positionMs: Long,
             val durationMs: Long,
             val playbackSpeed: Float,
@@ -37,12 +36,15 @@ sealed interface SystemIngestionEvent {
             val album: String?,
             val albumArtBitmap: Bitmap?,
             val albumArtUri: Uri?,
-            val launchIntent: PendingIntent? = null
+            val launchIntent: PendingIntent? = null,
+            val dominantColorHex: String? = null,
+            val lyricLine: String? = null,
+            val audioRouteLabel: String? = null
         ) : Media
 
         data class WaveformVisualization(
             val packageName: String,
-            val amplitudes: List<Float> // Normalized 0.0f .. 1.0f (typically 4 or 5 bands)
+            val amplitudes: List<Float>
         ) : Media
 
         data class SessionDestroyed(
@@ -53,6 +55,7 @@ sealed interface SystemIngestionEvent {
     // --- Notification Ingestion Events ---
     sealed interface NotificationEvent : SystemIngestionEvent {
         object AccessRevoked : NotificationEvent
+
         data class Posted(
             val key: String,
             val packageName: String,
@@ -75,7 +78,12 @@ sealed interface SystemIngestionEvent {
             val postedAtMillis: Long? = null,
             val appLabel: String? = null,
             val groupKey: String? = null,
-            val importance: Int = 3
+            val importance: Int = 3,
+            val isProgressStyle: Boolean = false,
+            val progressSegments: Int = 0,
+            val progressTrackerLabel: String? = null,
+            val staleAtMillis: Long? = null,
+            val relevanceScore: Float = 0f
         ) : NotificationEvent
 
         data class Removed(
@@ -105,15 +113,6 @@ sealed interface SystemIngestionEvent {
             val durationSeconds: Long = 0L,
             val isMicrophoneMuted: Boolean = false,
             val isSpeakerphoneOn: Boolean = false,
-            /**
-             * True when this app is bound as the user's `InCallService`, i.e. it
-             * is the default dialer and can actually accept or end this call.
-             *
-             * The telephony-broadcast path can report a ringing call on any
-             * install, but without the binding there is no API that lets a third
-             * party answer or hang up. The UI needs to know, or it renders
-             * Answer/Decline buttons that silently do nothing.
-             */
             val isControllable: Boolean = false,
             val answerIntent: PendingIntent? = null,
             val disconnectIntent: PendingIntent? = null
@@ -182,24 +181,17 @@ sealed interface SystemIngestionEvent {
 sealed interface IslandUserCommand {
     object TapPrimary : IslandUserCommand
     object TapSecondary : IslandUserCommand
+    object TapTertiary : IslandUserCommand
     object LongPressPrimary : IslandUserCommand
     object LongPressSecondary : IslandUserCommand
+    object LongPressTertiary : IslandUserCommand
+    data class CycleActivityFocus(val direction: Int = 1) : IslandUserCommand
     object CollapseExpanded : IslandUserCommand
     object DismissAlertPeek : IslandUserCommand
-
-    /** Opens the accumulated notification inbox. */
     object OpenInbox : IslandUserCommand
-
-    /** Closes the inbox, leaving its contents intact. */
     object CloseInbox : IslandUserCommand
-
-    /** Empties the inbox. */
     object ClearInbox : IslandUserCommand
-
-    /** Dismisses only this inbox entry and its matching system notification. */
     data class DismissNotification(val key: String) : IslandUserCommand
-
-    /** Opens the source app for one inbox entry, by notification key. */
     data class OpenNotification(val key: String) : IslandUserCommand
     data class DismissActivity(val activityId: String) : IslandUserCommand
     data class CancelTimer(val activityId: String) : IslandUserCommand
@@ -211,8 +203,6 @@ sealed interface IslandUserCommand {
  * Thread-safe Event Bus connecting all ingestion providers to the priority arbiter and repository.
  */
 class IslandEventBus {
-
-    // Event bus with replay buffer capacity to ensure no burst of notifications or telecom events are dropped
     private val _events = MutableSharedFlow<SystemIngestionEvent>(
         replay = 0,
         extraBufferCapacity = 128,

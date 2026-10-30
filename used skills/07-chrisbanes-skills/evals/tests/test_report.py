@@ -1,0 +1,422 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from evals.harness.report import (
+    append_audit_decision,
+    build_audit_queue,
+    render_scorecard,
+    write_reports,
+)
+from evals.harness.score import compute_scorecard
+from evals.tests.test_score import complete_read_evidence, record
+
+
+class ReportTest(unittest.TestCase):
+    def test_reports_invalid_forced_evidence_separately_from_process_failures(self):
+        item = record(
+            "to-plan:forced",
+            "forced",
+            True,
+            target=("to-plan",),
+        )
+        item.update(
+            {
+                "subject": {"events": [], "returncode": 0},
+                "judge": {"events": [], "returncode": 0},
+            }
+        )
+
+        markdown = render_scorecard(compute_scorecard([item]), [item])
+
+        self.assertIn("Invalid forced evidence: 1 (`to-plan:forced`)", markdown)
+        self.assertIn("Process failures: 0", markdown)
+        self.assertIn("forced_integrity: NOT MET", markdown)
+
+    def test_audit_queue_includes_disagreements_inconsistency_and_seeded_sample(self):
+        records = []
+        for index in range(20):
+            item = record(f"case-{index}:automatic", "automatic", True)
+            item.update(
+                {
+                    "case_id": f"case-{index}",
+                    "repetition": 1,
+                    "objective_pass": True,
+                    "judge_pass": False if index == 0 else True,
+                }
+            )
+            records.append(item)
+        repeated = record("case-1:automatic:2", "automatic", False)
+        repeated.update(
+            {
+                "case_id": "case-1",
+                "repetition": 2,
+                "objective_pass": False,
+                "judge_pass": False,
+            }
+        )
+        records.append(repeated)
+
+        queue = build_audit_queue(records, seed=7)
+        reasons = {entry["id"]: set(entry["reasons"]) for entry in queue}
+
+        self.assertIn("judge-objective-disagreement", reasons["case-0:automatic"])
+        self.assertIn("within-condition-inconsistency", reasons["case-1:automatic"])
+        self.assertIn("within-condition-inconsistency", reasons["case-1:automatic:2"])
+        sampled = [entry for entry in queue if "seeded-sample" in entry["reasons"]]
+        self.assertEqual(2, len(sampled))
+
+    def test_writes_machine_results_and_advisory_markdown(self):
+        records = [
+            record(
+                "one:none",
+                "none",
+                False,
+                expected=("compose-state-and-effects",),
+            ),
+            record(
+                "one:forced",
+                "forced",
+                True,
+                expected=("compose-state-and-effects",),
+            ),
+            record(
+                "one:automatic",
+                "automatic",
+                True,
+                expected=("compose-state-and-effects",),
+            ),
+        ]
+        for item in records:
+            subject_input_tokens = (
+                61774 if item["arm"] == "automatic" else 43198
+            )
+            item.update({
+                "suite": "compose",
+                "target_skills": ["compose-state-and-effects"],
+                "objective_pass": item["outcome_pass"],
+                "judge_pass": item["outcome_pass"],
+                "repetition": 1,
+                "subject": {
+                    "usage": {
+                        "input_tokens": subject_input_tokens,
+                        "output_tokens": 2,
+                    },
+                    "events": [
+                        {"type": "item.completed", "item": {"type": "command_execution"}},
+                        {"type": "turn.completed"},
+                    ],
+                    "elapsed_seconds": 1.5,
+                    "retries": 0,
+                    "returncode": 0,
+                },
+                "judge": {
+                    "usage": {"input_tokens": 4, "output_tokens": 1},
+                    "events": [
+                        {
+                            "type": "item.completed",
+                            "item": {"type": "command_execution"},
+                        }
+                    ],
+                    "elapsed_seconds": 0.5,
+                    "retries": 0,
+                    "returncode": 0,
+                },
+            })
+            if item["arm"] == "forced":
+                item["reported_skills"] = ["compose-state-and-effects"]
+                item["forced_target_preflight"] = {
+                    "valid": True,
+                    "targets": [{
+                        "skill": "compose-state-and-effects",
+                        "staged_path": "/workspace/.agents/skills/compose-state-and-effects/SKILL.md",
+                        "staged_relative_path": ".agents/skills/compose-state-and-effects/SKILL.md",
+                        "status": "valid",
+                    }],
+                }
+                item["subject"]["events"][0]["item"].update({
+                    "status": "completed",
+                    "exit_code": 0,
+                    "command": "cat .agents/skills/compose-state-and-effects/SKILL.md",
+                })
+                complete_read_evidence(item)
+        score = compute_scorecard(records)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = write_reports(Path(temp_dir), records, score, seed=3)
+
+            self.assertEqual(3, len(json.loads(paths["results"].read_text())))
+            markdown = paths["scorecard"].read_text()
+            self.assertIn("Advisory Compose Skill Scorecard", markdown)
+            self.assertIn("not a merge or release gate", markdown)
+            self.assertIn("Reported automatic routing precision", markdown)
+            self.assertIn("Per-skill diagnostics", markdown)
+            self.assertIn("`compose-state-and-effects`", markdown)
+            self.assertIn("Efficiency (non-gating)", markdown)
+            self.assertIn(
+                "Per-skill efficiency (baseline vs automatic)", markdown
+            )
+            self.assertIn(
+                "| `compose-state-and-effects` | 43.2k → 61.8k (+43%) | 1 → 1 (+0%) | 1 → 1 (+0%) | 1.5s → 1.5s (+0%) |",
+                markdown,
+            )
+            self.assertNotIn("| Skill | Total tokens", markdown)
+            self.assertIn(
+                "| forced | 1 / 1 | 43.2k | 1 | 1 | 1.5s | 43.2k | 1 | 1 | 1.5s |",
+                markdown,
+            )
+            self.assertIn(
+                "| none | 0 / 1 | 43.2k | 1 | 1 | 1.5s | unavailable | unavailable | unavailable | unavailable |",
+                markdown,
+            )
+            self.assertIn("Input tokens: 148182", markdown)
+            self.assertIn("Output tokens: 9", markdown)
+            self.assertIn("Tool events: 6", markdown)
+            self.assertIn("Retries: 0", markdown)
+            self.assertEqual(markdown, render_scorecard(score, records))
+
+    def test_legacy_retry_diagnostics_are_unavailable_without_attempts(self):
+        item = record(
+            "one:automatic",
+            "automatic",
+            True,
+            expected=("compose-state-and-effects",),
+        )
+        item.update(
+            {
+                "suite": "compose",
+                "subject": {
+                    "usage": {"input_tokens": 100, "output_tokens": 10},
+                    "events": [
+                        {
+                            "type": "item.completed",
+                            "item": {"type": "command_execution"},
+                        }
+                    ],
+                    "elapsed_seconds": 1.5,
+                    "retries": 1,
+                    "returncode": 0,
+                },
+                "judge": {
+                    "usage": {"input_tokens": 20, "output_tokens": 2},
+                    "events": [],
+                    "elapsed_seconds": 0.5,
+                    "retries": 0,
+                    "returncode": 0,
+                },
+            }
+        )
+
+        markdown = render_scorecard(compute_scorecard([item]), [item])
+
+        self.assertIn("Input tokens: unavailable", markdown)
+        self.assertIn("Output tokens: unavailable", markdown)
+        self.assertIn("Tool events: unavailable", markdown)
+        self.assertIn("Elapsed time: unavailable", markdown)
+        self.assertIn("Process failures: unavailable", markdown)
+        self.assertIn("Retries: 1", markdown)
+
+    def test_per_skill_restraint_groups_negative_controls_by_target(self):
+        records = [
+            record(
+                "negative:forced",
+                "forced",
+                True,
+                kind="negative",
+                expected=(),
+            ),
+            record(
+                "negative:automatic",
+                "automatic",
+                True,
+                kind="negative",
+                expected=(),
+            ),
+        ]
+        for item in records:
+            item.update({
+                "suite": "compose",
+                "target_skills": ["compose-state-and-effects"],
+            })
+            if item["arm"] == "forced":
+                item["reported_skills"] = ["compose-state-and-effects"]
+                item["forced_target_preflight"] = {
+                    "valid": True,
+                    "targets": [{
+                        "skill": "compose-state-and-effects",
+                        "staged_path": "/workspace/.agents/skills/compose-state-and-effects/SKILL.md",
+                        "staged_relative_path": ".agents/skills/compose-state-and-effects/SKILL.md",
+                        "status": "valid",
+                    }],
+                }
+                item["subject"] = {"events": [{
+                    "type": "item.completed",
+                    "item": {
+                        "type": "command_execution", "status": "completed",
+                        "exit_code": 0,
+                        "command": "cat .agents/skills/compose-state-and-effects/SKILL.md",
+                    },
+                }]}
+                complete_read_evidence(item)
+
+        markdown = render_scorecard(compute_scorecard(records), records)
+
+        self.assertIn(
+            "| `compose-state-and-effects` | 0 | not met | not met | not met | "
+            "not met | 100.0% | 100.0% |",
+            markdown,
+        )
+
+    def test_per_skill_count_uses_the_arms_present_in_a_partial_run(self):
+        records = [
+            record(
+                "one:forced",
+                "forced",
+                True,
+                expected=("compose-state-and-effects",),
+            )
+        ]
+        records[0].update(
+            {
+                "suite": "compose",
+                "target_skills": ["compose-state-and-effects"],
+                "reported_skills": ["compose-state-and-effects"],
+                "forced_target_preflight": {
+                    "valid": True,
+                    "targets": [{
+                        "skill": "compose-state-and-effects",
+                        "staged_path": "/workspace/.agents/skills/compose-state-and-effects/SKILL.md",
+                        "staged_relative_path": ".agents/skills/compose-state-and-effects/SKILL.md",
+                        "status": "valid",
+                    }],
+                },
+                "subject": {"events": [{
+                    "type": "item.completed",
+                    "item": {
+                        "type": "command_execution", "status": "completed",
+                        "exit_code": 0,
+                        "command": "cat .agents/skills/compose-state-and-effects/SKILL.md",
+                    },
+                }]},
+            }
+        )
+        complete_read_evidence(records[0])
+
+        markdown = render_scorecard(compute_scorecard(records), records)
+
+        self.assertIn("| `compose-state-and-effects` | 1 |", markdown)
+
+    def automatic_pair(self, observed):
+        records = [
+            record(
+                f"{name}:automatic", "automatic", True,
+                expected=("compose-state-and-effects",),
+                reported=("compose-state-and-effects",),
+            )
+            for name in ("one", "two")
+        ]
+        for item, value in zip(records, observed):
+            item["suite"] = "compose"
+            if value != "absent":
+                item["observed_skills"] = value
+        return records
+
+    def test_observed_routing_lines_require_a_recorded_skill_activation(self):
+        records = self.automatic_pair([["compose-state-and-effects"], []])
+        records[0]["runtime"] = "claude"
+
+        markdown = render_scorecard(compute_scorecard(records), records)
+
+        self.assertIn("- Observed routing precision: 100.0%", markdown)
+        self.assertIn("- Observed routing recall: 50.0%", markdown)
+        self.assertLess(
+            markdown.index("Reported automatic routing recall"),
+            markdown.index("Observed routing precision"),
+        )
+        self.assertIn("cache", markdown)
+
+    def test_scorecard_without_observed_skills_is_unchanged(self):
+        legacy = self.automatic_pair(["absent", "absent"])
+        recorded_null = self.automatic_pair([None, None])
+
+        expected = render_scorecard(compute_scorecard(legacy), legacy)
+
+        self.assertEqual(
+            expected, render_scorecard(compute_scorecard(recorded_null), recorded_null)
+        )
+        self.assertNotIn("Observed", expected)
+        self.assertNotIn("cache", expected)
+        self.assertIn(
+            "- Reported automatic routing recall: 100.0%\n"
+            "- Router reported in automatic arm: 0.0%\n"
+            "- Forbidden-action failures: 0\n",
+            expected,
+        )
+        self.assertIn(
+            "Token counts are Codex input plus output tokens. Tool calls count "
+            "completed command, file-change, MCP, web-search, and generic tool "
+            "events. Wall-clock time is environment-sensitive.\n",
+            expected,
+        )
+
+    def test_token_note_describes_only_the_runtimes_present(self):
+        claude_only = self.automatic_pair(["absent", "absent"])
+        for item in claude_only:
+            item["runtime"] = "claude"
+        mixed = self.automatic_pair(["absent", "absent"])
+        mixed[0]["runtime"] = "claude"
+
+        claude_markdown = render_scorecard(compute_scorecard(claude_only), claude_only)
+        mixed_markdown = render_scorecard(compute_scorecard(mixed), mixed)
+
+        self.assertNotIn("Codex", claude_markdown)
+        self.assertIn(
+            "Claude Code token counts are input, cache creation, cache read, and "
+            "output tokens; its tool calls exclude the structured-output call.",
+            claude_markdown,
+        )
+        self.assertIn("Token counts are Codex input plus output tokens.", mixed_markdown)
+        self.assertIn("Claude Code token counts are input, cache creation", mixed_markdown)
+
+    def test_isolation_invalid_counts_render_only_when_a_run_was_excluded(self):
+        valid = self.automatic_pair(["absent", "absent"])
+        mixed = self.automatic_pair(["absent", "absent"])
+        mixed[1]["forced_target_preflight"] = {
+            "valid": False, "targets": [], "isolation": {"valid": False},
+        }
+        none = record("three:none", "none", True)
+        none["suite"] = "compose"
+        none["forced_target_preflight"] = mixed[1]["forced_target_preflight"]
+        mixed.append(none)
+
+        baseline = render_scorecard(compute_scorecard(valid), valid)
+        markdown = render_scorecard(compute_scorecard(mixed), mixed)
+
+        # An all-valid set keeps the integrity section exactly as it was.
+        self.assertIn(
+            "## Evaluator integrity\n\n- Invalid forced evidence: 0\n- missing target: 0\n"
+            "- invocation failure: 0\n- reporting failure: 0\n\n## Efficiency (non-gating)\n",
+            baseline,
+        )
+        self.assertNotIn("Isolation-invalid", baseline)
+        self.assertIn(
+            "- reporting failure: 0\n"
+            "- Isolation-invalid runs (excluded from metrics): none 1, forced 0, automatic 1\n"
+            "\n## Efficiency (non-gating)\n",
+            markdown,
+        )
+
+    def test_audit_decisions_append_without_overwriting_raw_judgments(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "audit-decisions.jsonl"
+            append_audit_decision(path, "case:none:1", "accept", "checks agree")
+            append_audit_decision(path, "case:none:1", "reject", "manual review")
+
+            decisions = [json.loads(line) for line in path.read_text().splitlines()]
+            self.assertEqual(["accept", "reject"], [item["decision"] for item in decisions])
+            self.assertEqual("case:none:1", decisions[0]["id"])
+
+
+if __name__ == "__main__":
+    unittest.main()

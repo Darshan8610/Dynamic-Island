@@ -1,0 +1,2745 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+from collections import Counter
+import fnmatch
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import posixpath
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from types import MappingProxyType
+from typing import Any, Callable, Mapping, NamedTuple
+
+import yaml
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_OUTPUT = ROOT / "catalog" / "smartperfetto-export.json"
+MIGRATION_COVERAGE = ROOT / "docs" / "migration-coverage.md"
+PUBLIC_SKILL = "perfetto-performance-analysis"
+WORKFLOWS = {
+    "trace-overview",
+    "startup",
+    "scrolling",
+    "interaction",
+    "anr-blocking",
+    "cpu-scheduling",
+    "memory",
+    "gpu-rendering",
+    "power-thermal",
+    "io-network-media",
+    "frameworks-games",
+    "rendering-pipeline",
+    "scene-reconstruction",
+    "trace-comparison",
+}
+GENERATED_PREFIX = Path("references/generated")
+SKILL_ROOT = ROOT / "skills" / PUBLIC_SKILL
+SKILL_SCRIPTS = SKILL_ROOT / "scripts"
+if str(SKILL_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SKILL_SCRIPTS))
+
+from runtime.executor import step_expressions  # noqa: E402
+from runtime.expressions import validate as validate_expression  # noqa: E402
+from _common import (  # noqa: E402
+    is_process_scope_name, reject_process_scope_names, runtime_sql_bindings,
+    sql_template_names, sql_template_roots, validate_process_scope_declaration,
+)
+SUPPORTED_STEP_TYPES = {
+    "atomic",
+    "skill",
+    "diagnostic",
+    "iterator",
+    "ai_summary",
+}
+ANDROID_API_LEVELS = tuple(range(28, 38))
+CAPABILITY_STATES = (
+    "unsupported",
+    "not_recorded",
+    "recorded_empty",
+    "recorded_populated",
+    "unknown",
+)
+PERSISTENT_OBJECT = re.compile(
+    r"\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:PERFETTO\s+)?"
+    r"(?P<kind>TABLE|VIEW|FUNCTION|MACRO)\s+(?:IF\s+NOT\s+EXISTS\s+)?"
+    r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
+DROP_OBJECT = re.compile(
+    r"\bDROP\s+(?P<kind>TABLE|VIEW|FUNCTION|MACRO)\s+"
+    r"(?:IF\s+EXISTS\s+)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
+PRODUCT_RUNTIME_PATTERN = re.compile(
+    r"\b(?:submit_plan|invoke_skill|create_artifact|fetch_artifact|load_artifact|"
+    r"get_artifact|artifact_api|session_state|navigate_timeline|pin_tracks)\b"
+    r"|SmartPerfetto(?:\s+UI)?",
+    re.IGNORECASE,
+)
+
+SKILL_WORKFLOW_OVERRIDES = {
+    "android_dvfs_counter_stats": "cpu-scheduling",
+    "android_kernel_wakelock_summary": "power-thermal",
+    "ams_module": "startup",
+    "art_module": "memory",
+    "block_io_analysis": "io-network-media",
+    "frame_blocking_calls": "scrolling",
+    "launcher_module": "startup",
+    "linux_perf_counter_hotspots": "cpu-scheduling",
+    "pipeline_4feature_scoring": "rendering-pipeline",
+    "pipeline_key_slices_overlay": "rendering-pipeline",
+    "rendering_pipeline_detection": "rendering-pipeline",
+    "suspend_wakeup_analysis": "power-thermal",
+    "wakelock_tracking": "power-thermal",
+    "wms_module": "interaction",
+}
+
+
+class ExportError(RuntimeError):
+    pass
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def git_output(source: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=source,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        raise ExportError(f"git {' '.join(args)} failed: {detail}")
+    return completed.stdout.strip()
+
+
+_GITHUB_REMOTE = re.compile(
+    r"^(?:git@github\.com:|ssh://git@github\.com/|https?://github\.com/)"
+    r"(?P<slug>[^/]+/[^/]+?)(?:\.git)?/?$",
+    re.IGNORECASE,
+)
+
+
+def canonical_repository(remote: str) -> str:
+    match = _GITHUB_REMOTE.fullmatch(remote.strip())
+    if match:
+        return f"https://github.com/{match.group('slug')}"
+    return remote.strip().removesuffix("/")
+
+
+def source_state(source: Path) -> dict[str, Any]:
+    return {
+        "commit": git_output(source, "rev-parse", "HEAD"),
+        "dirty": bool(git_output(source, "status", "--short")),
+        "remote": canonical_repository(
+            git_output(source, "remote", "get-url", "origin")
+        ),
+    }
+
+
+def load_yaml(path: Path) -> dict[str, Any]:
+    try:
+        parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ExportError(f"Invalid YAML in {path}: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ExportError(f"Expected a YAML mapping in {path}")
+    return parsed
+
+
+def skill_yaml_files(source: Path) -> list[Path]:
+    return sorted((source / "backend" / "skills").rglob("*.skill.yaml"))
+
+
+def is_runtime_candidate(path: Path, source: Path) -> bool:
+    relative = path.relative_to(source).as_posix()
+    return "/_template/" not in f"/{relative}" and path.name != "_base.skill.yaml"
+
+
+def strategy_files(source: Path) -> list[Path]:
+    root = source / "backend" / "strategies"
+    return sorted(path for path in root.rglob("*") if path.is_file())
+
+
+def pipeline_doc_files(source: Path) -> list[Path]:
+    return sorted((source / "docs" / "rendering_pipelines").rglob("*.md"))
+
+
+def sql_fragment_files(source: Path) -> list[Path]:
+    return sorted((source / "backend" / "skills" / "fragments").glob("*.sql"))
+
+
+def vendor_override_files(source: Path) -> list[Path]:
+    return sorted((source / "backend" / "skills" / "vendors").rglob("*.override.yaml"))
+
+
+def classify_skill(name: str, raw: dict[str, Any]) -> str:
+    skill_type = str(raw.get("type", ""))
+    lowered = name.lower()
+    if lowered in SKILL_WORKFLOW_OVERRIDES:
+        return SKILL_WORKFLOW_OVERRIDES[lowered]
+    if skill_type == "pipeline_definition":
+        return "rendering-pipeline"
+    if skill_type == "comparison" or "comparison" in lowered:
+        return "trace-comparison"
+    if lowered == "scene_reconstruction":
+        return "scene-reconstruction"
+    if any(
+        token in lowered
+        for token in (
+            "flutter",
+            "rn_",
+            "react_native",
+            "compose",
+            "game_",
+            "fpsgo",
+            "launcher_module",
+            "third_party_module",
+        )
+    ):
+        return "frameworks-games"
+    if "startup" in lowered or "app_process_starts" in lowered:
+        return "startup"
+    if any(
+        token in lowered
+        for token in ("click", "touch", "input", "navigation", "app_lifecycle")
+    ):
+        return "interaction"
+    if any(
+        token in lowered
+        for token in ("anr", "binder", "blocking", "lock_", "contention", "futex")
+    ):
+        return "anr-blocking"
+    if any(
+        token in lowered
+        for token in (
+            "memory",
+            "heap",
+            "gc_",
+            "_gc",
+            "lmk",
+            "oom",
+            "dmabuf",
+            "rss",
+            "bitmap",
+            "page_fault",
+            "allocation",
+        )
+    ):
+        return "memory"
+    if any(
+        token in lowered
+        for token in (
+            "power",
+            "battery",
+            "thermal",
+            "wakelock",
+            "doze",
+            "screen_off",
+            "energy",
+            "rail",
+        )
+    ):
+        return "power-thermal"
+    if any(
+        token in lowered
+        for token in (
+            "filesystem",
+            "file_io",
+            "block_io",
+            "io_pressure",
+            "network",
+            "modem",
+            "media",
+            "codec",
+            "logcat",
+            "webview",
+            "v8_",
+        )
+    ):
+        return "io-network-media"
+    if any(
+        token in lowered
+        for token in (
+            "cpu",
+            "sched",
+            "irq",
+            "runqueue",
+            "affinity",
+            "task_migration",
+            "cache_miss",
+            "system_load",
+            "util_tracking",
+            "wakeup_frequency",
+        )
+    ):
+        return "cpu-scheduling"
+    if any(
+        token in lowered
+        for token in (
+            "gpu",
+            "surfaceflinger",
+            "sf_",
+            "fence",
+            "composition",
+            "buffer_",
+            "render_pipeline",
+            "vrr_",
+        )
+    ):
+        return "gpu-rendering"
+    if any(
+        token in lowered
+        for token in (
+            "scroll",
+            "jank",
+            "frame",
+            "vsync",
+            "choreographer",
+            "render_thread",
+        )
+    ):
+        return "scrolling"
+    return "trace-overview"
+
+
+def strategy_product_only_reason(path: Path) -> str | None:
+    name = path.name
+    product_only_prefixes = (
+        "case-",
+        "code-aware.",
+        "prompt-complexity-",
+        "prompt-final-report-missing-",
+        "prompt-language-",
+        "prompt-openai-",
+        "prompt-quick.",
+        "prompt-recent-",
+        "prompt-role.",
+        "prompt-session-",
+        "runtime-correctness.",
+    )
+    if name.startswith(product_only_prefixes):
+        return "SmartPerfetto runtime, session, case, language, or codebase orchestration"
+    return None
+
+
+def classify_strategy(path: Path) -> str:
+    name = path.name.lower()
+    if "comparison" in name:
+        return "trace-comparison"
+    if "scene-reconstruction" in name:
+        return "scene-reconstruction"
+    if "startup" in name:
+        return "startup"
+    if "scrolling" in name or "scroll-response" in name:
+        return "scrolling"
+    if "interaction" in name or "touch-tracking" in name:
+        return "interaction"
+    if "anr" in name or "binder" in name or "lock" in name or "thread-state" in name:
+        return "anr-blocking"
+    if "memory" in name or "gc-" in name or "data-sources" in name:
+        return "memory"
+    if "power" in name or "thermal" in name:
+        return "power-thermal"
+    if any(token in name for token in ("io.", "network", "media")):
+        return "io-network-media"
+    if "linux" in name or "cpu-scheduler" in name:
+        return "cpu-scheduling"
+    if any(token in name for token in ("pipeline", "rendering", "fences", "arch-")):
+        return "rendering-pipeline"
+    if "game" in name or "harmonyos" in name:
+        return "frameworks-games"
+    return "trace-overview"
+
+
+def destination_for_strategy(path: Path) -> str:
+    directory = "knowledge" if path.name.startswith("knowledge-") else "strategies"
+    suffix = ".md" if path.suffix != ".md" else ""
+    return f"references/generated/{directory}/{path.name}{suffix}"
+
+
+def bootstrap_policy(source: Path) -> dict[str, Any]:
+    skills: dict[str, Any] = {}
+    for path in skill_yaml_files(source):
+        if not is_runtime_candidate(path, source):
+            continue
+        raw = load_yaml(path)
+        name = raw.get("name")
+        if not isinstance(name, str) or not name:
+            raise ExportError(f"Runtime Skill has no name: {path}")
+        if name in skills:
+            raise ExportError(f"Duplicate runtime Skill name: {name}")
+        skills[name] = {
+            "source": path.relative_to(source).as_posix(),
+            "workflow": classify_skill(name, raw),
+            "disposition": "exported",
+            "destination": f"references/generated/skills/{name}.md",
+        }
+
+    strategies: dict[str, Any] = {}
+    for path in strategy_files(source):
+        relative = path.relative_to(source).as_posix()
+        reason = strategy_product_only_reason(path)
+        if reason:
+            strategies[relative] = {
+                "disposition": "product-only",
+                "reason": reason,
+            }
+        else:
+            strategies[relative] = {
+                "workflow": classify_strategy(path),
+                "disposition": "exported",
+                "destination": destination_for_strategy(path),
+            }
+
+    pipeline_docs: dict[str, Any] = {}
+    for path in pipeline_doc_files(source):
+        relative = path.relative_to(source).as_posix()
+        pipeline_docs[relative] = {
+            "disposition": "exported",
+            "destination": f"references/generated/pipelines/docs/{path.name}",
+        }
+
+    return {
+        "version": 2,
+        "public_skill": PUBLIC_SKILL,
+        "excluded_runtime_paths": [
+            "backend/skills/_template/",
+            "backend/skills/pipelines/_base.skill.yaml",
+        ],
+        "skills": skills,
+        "strategies": strategies,
+        "pipeline_docs": pipeline_docs,
+        "sql_fragments": {
+            path.relative_to(source).as_posix(): {
+                "disposition": "exported",
+                "destination": (
+                    "references/generated/runtime/fragments/" + path.name
+                ),
+            }
+            for path in sql_fragment_files(source)
+        },
+        "vendor_overrides": {
+            path.relative_to(source).as_posix(): {
+                "disposition": "exported",
+                "application_mode": "advisory_only",
+                "destination": (
+                    "references/generated/runtime/vendor-overrides/"
+                    + path.parent.name
+                    + "-"
+                    + path.name.removesuffix(".override.yaml")
+                    + ".json"
+                ),
+            }
+            for path in vendor_override_files(source)
+        },
+    }
+
+
+def write_text_atomic(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, delete=False
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(content)
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def write_bootstrap_policy(path: Path, policy: dict[str, Any]) -> None:
+    if path.exists():
+        raise ExportError(f"Refusing to overwrite existing export policy: {path}")
+    header = (
+        "# SPDX-License-Identifier: AGPL-3.0-or-later\n"
+        "# Copyright (C) 2024-2026 Gracker (Chris)\n"
+        "# Explicit public Agent Skill projection policy. New source files must be classified.\n\n"
+    )
+    serialized = yaml.safe_dump(
+        policy,
+        sort_keys=False,
+        allow_unicode=True,
+        width=120,
+    )
+    write_text_atomic(path, header + serialized)
+
+
+def validate_policy_sources(
+    source: Path,
+    policy: dict[str, Any],
+    runtime_files: list[Path],
+    strategies: list[Path],
+    pipeline_docs: list[Path],
+) -> None:
+    if policy.get("version") != 2 or policy.get("public_skill") != PUBLIC_SKILL:
+        raise ExportError("Unsupported public export policy version or public_skill")
+    fixture_source = policy.get("fixture_manifest_source")
+    if not isinstance(fixture_source, str) or not (source / fixture_source).is_file():
+        raise ExportError("Policy fixture_manifest_source must name an existing file")
+    official = policy.get("official_perfetto")
+    required_official = {
+        "repository",
+        "tag",
+        "commit",
+        "rpc_api_version",
+        "stdlib_tree",
+        "official_skill_reference",
+        "official_skill_role",
+    }
+    if not isinstance(official, dict) or not required_official.issubset(official):
+        raise ExportError("Policy official_perfetto lock is incomplete")
+    runtime = policy.get("runtime_perfetto")
+    required_runtime = {
+        "repository",
+        "reported_version",
+        "revision",
+        "rpc_api_version",
+        "stdlib_tree",
+    }
+    if not isinstance(runtime, dict) or not required_runtime.issubset(runtime):
+        raise ExportError("Policy runtime_perfetto lock is incomplete")
+
+    runtime_by_name: dict[str, str] = {}
+    for path in runtime_files:
+        raw = load_yaml(path)
+        name = raw.get("name")
+        if not isinstance(name, str):
+            raise ExportError(f"Runtime Skill has no string name: {path}")
+        if name in runtime_by_name:
+            raise ExportError(f"Duplicate runtime Skill name: {name}")
+        runtime_by_name[name] = path.relative_to(source).as_posix()
+
+    policy_skills = policy.get("skills")
+    if not isinstance(policy_skills, dict):
+        raise ExportError("Policy skills must be a mapping")
+    missing = sorted(set(runtime_by_name) - set(policy_skills))
+    stale = sorted(set(policy_skills) - set(runtime_by_name))
+    if missing or stale:
+        raise ExportError(f"Policy Skill mismatch: missing={missing}, stale={stale}")
+    for name, relative in runtime_by_name.items():
+        config = policy_skills[name]
+        if not isinstance(config, dict) or config.get("source") != relative:
+            raise ExportError(f"Policy source mismatch for Skill {name}: {relative}")
+
+    for key, current_paths in (
+        ("strategies", strategies),
+        ("pipeline_docs", pipeline_docs),
+        ("sql_fragments", sql_fragment_files(source)),
+        ("vendor_overrides", vendor_override_files(source)),
+    ):
+        mapping = policy.get(key)
+        if not isinstance(mapping, dict):
+            raise ExportError(f"Policy {key} must be a mapping")
+        current = {path.relative_to(source).as_posix() for path in current_paths}
+        missing_paths = sorted(current - set(mapping))
+        stale_paths = sorted(set(mapping) - current)
+        if missing_paths or stale_paths:
+            raise ExportError(
+                f"Policy {key} mismatch: missing={missing_paths}, stale={stale_paths}"
+            )
+
+
+def validate_disposition(config: dict[str, Any], label: str) -> None:
+    disposition = config.get("disposition")
+    if disposition not in {"exported", "merged", "product-only"}:
+        raise ExportError(f"Invalid disposition for {label}: {disposition}")
+    if disposition == "product-only":
+        if not config.get("reason"):
+            raise ExportError(f"Product-only source requires a reason: {label}")
+        return
+    if config.get("workflow") not in WORKFLOWS:
+        raise ExportError(f"Invalid workflow for {label}: {config.get('workflow')}")
+    if not config.get("destination"):
+        raise ExportError(f"Exported source requires a destination: {label}")
+
+
+def build_catalog(source: Path, policy_path: Path) -> dict[str, Any]:
+    state = source_state(source)
+    all_skills = skill_yaml_files(source)
+    runtime_files = [path for path in all_skills if is_runtime_candidate(path, source)]
+    strategies = strategy_files(source)
+    pipeline_docs = pipeline_doc_files(source)
+    policy = load_yaml(policy_path)
+    validate_policy_sources(
+        source, policy, runtime_files, strategies, pipeline_docs
+    )
+
+    policy_skills = policy["skills"]
+    skill_entries: list[dict[str, Any]] = []
+    exported_fragment_refs: dict[str, set[str]] = {}
+    runtime_types: Counter[str] = Counter()
+    for name in sorted(policy_skills):
+        config = policy_skills[name]
+        validate_disposition(config, f"Skill {name}")
+        path = source / config["source"]
+        raw = load_yaml(path)
+        if config["disposition"] != "product-only":
+            exported_fragment_refs[name] = referenced_sql_fragments(raw)
+        runtime_type = str(raw.get("type", "unknown"))
+        runtime_types[runtime_type] += 1
+        entry = {
+            "name": name,
+            "source_path": config["source"],
+            "source_sha256": sha256_file(path),
+            "version": str(raw.get("version", "1.0")),
+            "runtime_type": runtime_type,
+            "category": raw.get("category"),
+            "tier": raw.get("tier"),
+            "workflow": config.get("workflow"),
+            "disposition": config["disposition"],
+            "destination": config.get("destination"),
+            "reason": config.get("reason"),
+        }
+        skill_entries.append({key: value for key, value in entry.items() if value is not None})
+
+    strategy_entries: list[dict[str, Any]] = []
+    for relative in sorted(policy["strategies"]):
+        config = policy["strategies"][relative]
+        validate_disposition(config, relative)
+        path = source / relative
+        entry = {
+            "source_path": relative,
+            "source_sha256": sha256_file(path),
+            "workflow": config.get("workflow"),
+            "disposition": config["disposition"],
+            "destination": config.get("destination"),
+            "reason": config.get("reason"),
+        }
+        strategy_entries.append(
+            {key: value for key, value in entry.items() if value is not None}
+        )
+
+    pipeline_entries: list[dict[str, Any]] = []
+    for relative in sorted(policy["pipeline_docs"]):
+        config = policy["pipeline_docs"][relative]
+        disposition = config.get("disposition")
+        if disposition != "exported" or not config.get("destination"):
+            raise ExportError(f"Pipeline doc must be exported: {relative}")
+        path = source / relative
+        pipeline_entries.append(
+            {
+                "source_path": relative,
+                "source_sha256": sha256_file(path),
+                "disposition": disposition,
+                "destination": config["destination"],
+            }
+        )
+
+    fragment_entries: list[dict[str, Any]] = []
+    for relative in sorted(policy["sql_fragments"]):
+        config = policy["sql_fragments"][relative]
+        disposition = config.get("disposition")
+        path = source / relative
+        entry = {"source_path": relative, "source_sha256": sha256_file(path)}
+        if disposition == "product-only":
+            if not config.get("reason") or config.get("destination"):
+                raise ExportError(
+                    f"Product-only SQL fragment requires a reason and no destination: {relative}"
+                )
+            entry.update(disposition="product-only", reason=config["reason"])
+        elif disposition == "exported" and config.get("destination"):
+            entry.update(destination=config["destination"], disposition="exported")
+        else:
+            raise ExportError(f"SQL fragment must be exported or product-only: {relative}")
+        fragment_entries.append(entry)
+    product_only_fragments = {
+        entry["source_path"]
+        for entry in fragment_entries
+        if entry["disposition"] == "product-only"
+    }
+    for name, refs in exported_fragment_refs.items():
+        if leaked := sorted(refs & product_only_fragments):
+            raise ExportError(
+                f"Exported Skill {name} inlines product-only SQL fragments: {leaked}"
+            )
+
+    override_entries: list[dict[str, Any]] = []
+    for relative in sorted(policy["vendor_overrides"]):
+        config = policy["vendor_overrides"][relative]
+        if (
+            config.get("disposition") != "exported"
+            or config.get("application_mode") != "advisory_only"
+            or not config.get("destination")
+        ):
+            raise ExportError(f"Vendor override must be exported as advisory_only: {relative}")
+        path = source / relative
+        override_entries.append(
+            {
+                "source_path": relative,
+                "source_sha256": sha256_file(path),
+                "destination": config["destination"],
+                "disposition": "exported",
+                "application_mode": "advisory_only",
+            }
+        )
+
+    exported_strategies = sum(
+        entry["disposition"] != "product-only" for entry in strategy_entries
+    )
+    exported_fragments = sum(
+        entry["disposition"] == "exported" for entry in fragment_entries
+    )
+    return {
+        "schema_version": 1,
+        "public_skill": PUBLIC_SKILL,
+        "source": {
+            "repository": state["remote"],
+            "commit": state["commit"],
+            "dirty": state["dirty"],
+            "policy_path": policy_path.relative_to(source).as_posix(),
+            "policy_sha256": sha256_file(policy_path),
+        },
+        "summary": {
+            "skill_yaml_files": len(all_skills),
+            "runtime_candidates": len(runtime_files),
+            "excluded_skill_definitions": len(all_skills) - len(runtime_files),
+            "runtime_types": dict(sorted(runtime_types.items())),
+            "strategy_sources": len(strategy_entries),
+            "exported_strategy_sources": exported_strategies,
+            "product_only_strategy_sources": len(strategy_entries) - exported_strategies,
+            "pipeline_docs": len(pipeline_entries),
+            "sql_fragments": len(fragment_entries),
+            "exported_sql_fragments": exported_fragments,
+            "product_only_sql_fragments": len(fragment_entries) - exported_fragments,
+            "vendor_overrides": len(override_entries),
+        },
+        "skills": skill_entries,
+        "strategies": strategy_entries,
+        "pipeline_docs": pipeline_entries,
+        "sql_fragments": fragment_entries,
+        "vendor_overrides": override_entries,
+        "official_perfetto": policy["official_perfetto"],
+        "runtime_perfetto": policy["runtime_perfetto"],
+        "fixture_manifest_source": policy["fixture_manifest_source"],
+    }
+
+
+def serialize_catalog(catalog: dict[str, Any]) -> str:
+    return json.dumps(
+        catalog,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    ) + "\n"
+
+
+def markdown_count_table(
+    heading: str,
+    first_column: str,
+    counts: Counter[str],
+) -> str:
+    lines = [f"## {heading}", "", f"| {first_column} | Count |", "|---|---:|"]
+    lines.extend(f"| `{key}` | {counts[key]} |" for key in sorted(counts))
+    return "\n".join(lines) + "\n\n"
+
+
+def render_migration_coverage(catalog: dict[str, Any]) -> str:
+    summary = catalog["summary"]
+    runtime_types = Counter(
+        {str(key): int(value) for key, value in summary["runtime_types"].items()}
+    )
+    skill_workflows = Counter(str(entry["workflow"]) for entry in catalog["skills"])
+    skill_dispositions = Counter(
+        str(entry["disposition"]) for entry in catalog["skills"]
+    )
+    strategy_dispositions = Counter(
+        str(entry["disposition"]) for entry in catalog["strategies"]
+    )
+    pipeline_dispositions = Counter(
+        str(entry["disposition"]) for entry in catalog["pipeline_docs"]
+    )
+    return (
+        "GENERATED FILE - DO NOT EDIT.\n"
+        "Generated by `tools/export_from_smartperfetto.py`.\n\n"
+        "# SmartPerfetto migration coverage\n\n"
+        f"Source repository: `{catalog['source']['repository']}`\n\n"
+        f"Source commit: `{catalog['source']['commit']}`\n\n"
+        f"Export policy: `{catalog['source']['policy_path']}`\n\n"
+        f"Export policy SHA-256: `{catalog['source']['policy_sha256']}`\n\n"
+        "## Inventory\n\n"
+        "| Source family | Discovered | Publicly exported or merged | Product-only |\n"
+        "|---|---:|---:|---:|\n"
+        f"| Runtime Skill candidates | {summary['runtime_candidates']} | "
+        f"{sum(value for key, value in skill_dispositions.items() if key != 'product-only')} | "
+        f"{skill_dispositions.get('product-only', 0)} |\n"
+        f"| Strategy and knowledge sources | {summary['strategy_sources']} | "
+        f"{summary['exported_strategy_sources']} | {summary['product_only_strategy_sources']} |\n"
+        f"| Rendering-pipeline docs | {summary['pipeline_docs']} | "
+        f"{sum(value for key, value in pipeline_dispositions.items() if key != 'product-only')} | "
+        f"{pipeline_dispositions.get('product-only', 0)} |\n"
+        f"| SQL fragments | {summary['sql_fragments']} | "
+        f"{summary['exported_sql_fragments']} | {summary['product_only_sql_fragments']} |\n\n"
+        f"The source tree also contains {summary['excluded_skill_definitions']} "
+        "authoring template/base definitions that are not runtime candidates.\n\n"
+        + markdown_count_table("Runtime types", "Runtime type", runtime_types)
+        + markdown_count_table("Runtime Skills by workflow", "Workflow", skill_workflows)
+        + markdown_count_table(
+            "Runtime Skill dispositions", "Disposition", skill_dispositions
+        )
+        + markdown_count_table(
+            "Strategy dispositions", "Disposition", strategy_dispositions
+        )
+        + "## Boundary\n\n"
+        "Exported and merged entries become portable references under the standard Agent Skill. "
+        "Product-only strategy sources remain in SmartPerfetto because they depend on provider, "
+        "session, artifact, streaming, codebase, or UI orchestration. Product-only SQL fragments "
+        "serve SmartPerfetto engines outside the Skill runtime; no exported Skill may inline one. "
+        "Every discovered source must "
+        "remain explicitly classified by the committed export policy.\n"
+    )
+
+
+def generated_header(entry: dict[str, Any], comment: str = "") -> str:
+    # The source commit is recorded once in catalog.json. Stamping it into every
+    # file would make each sync rewrite the whole tree and every content hash.
+    prefix = f"{comment} " if comment else ""
+    return (
+        f"{prefix}GENERATED FILE - DO NOT EDIT.\n"
+        f"{prefix}Source: {entry['source_path']}\n"
+        f"{prefix}Source SHA-256: {entry['source_sha256']}\n"
+    )
+
+
+def write_generated_text(path: Path, content: str) -> None:
+    normalized = "\n".join(line.rstrip() for line in content.splitlines()).rstrip()
+    write_text_atomic(path, normalized + "\n")
+
+
+def yaml_block(value: object) -> str:
+    rendered = yaml.safe_dump(
+        value,
+        sort_keys=False,
+        allow_unicode=True,
+        width=120,
+    ).rstrip()
+    return f"```yaml\n{rendered}\n```"
+
+
+def markdown_section(title: str, value: object) -> str:
+    if value in (None, {}, []):
+        return ""
+    return f"## {title}\n\n{yaml_block(value)}\n\n"
+
+
+def safe_component(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ExportError(f"Missing generated filename component for {label}")
+    text = str(value)
+    normalized = re.sub(r"[^A-Za-z0-9._-]+", "-", text).strip("-.")
+    if not normalized:
+        raise ExportError(f"Cannot derive generated filename for {label}: {value!r}")
+    return normalized
+
+
+def destination_in_generated_root(destination: str) -> Path:
+    relative = Path(destination)
+    try:
+        inside = relative.relative_to(GENERATED_PREFIX)
+    except ValueError as exc:
+        raise ExportError(f"Generated destination is outside {GENERATED_PREFIX}: {destination}") from exc
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ExportError(f"Unsafe generated destination: {destination}")
+    return inside
+
+
+def infer_step_type(step: dict[str, Any], skill_name: str) -> str:
+    step_type = step.get("type")
+    if step_type is None:
+        if "skill" in step:
+            step_type = "skill"
+        elif "sql" in step:
+            step_type = "atomic"
+    if step_type not in SUPPORTED_STEP_TYPES:
+        raise ExportError(
+            f"Unsupported step type {step_type!r} in {skill_name}.{step.get('id', '<missing>')}"
+        )
+    return str(step_type)
+
+
+def render_step(
+    step: dict[str, Any],
+    skill_name: str,
+    source_entry: dict[str, Any],
+    generated_root: Path,
+    sql_destinations: set[str],
+) -> str:
+    step_id = safe_component(step.get("id"), f"{skill_name} step")
+    step_type = infer_step_type(step, skill_name)
+    title = str(step.get("name") or step_id)
+    lines = [f"### {title}", "", f"- ID: `{step_id}`", f"- Type: `{step_type}`"]
+    # Acquisition-ledger bindings belong to SmartPerfetto, not portable execution.
+    details = {
+        key: value for key, value in step.items()
+        if key not in {"sql", "name", "investigation_evidence"}
+    }
+    if "sql" in step:
+        sql = step["sql"]
+        if not isinstance(sql, str) or not sql.strip():
+            raise ExportError(f"Empty SQL in {skill_name}.{step_id}")
+        relative = Path("sql") / safe_component(skill_name, "Skill") / f"{step_id}.sql"
+        destination_key = relative.as_posix()
+        if destination_key in sql_destinations:
+            raise ExportError(f"Generated SQL collision: {destination_key}")
+        sql_destinations.add(destination_key)
+        sql_entry = {
+            "source_path": source_entry["source_path"],
+            "source_sha256": source_entry["source_sha256"],
+        }
+        sql_content = generated_header(sql_entry, "--") + "\n" + sql.strip() + "\n"
+        write_generated_text(generated_root / relative, sql_content)
+        lines.append(f"- SQL: [`../{relative.as_posix()}`](../{relative.as_posix()})")
+    lines.extend(["", yaml_block(details), ""])
+    return "\n".join(lines)
+
+
+def render_skill_reference(
+    raw: dict[str, Any],
+    entry: dict[str, Any],
+    generated_root: Path,
+    sql_destinations: set[str],
+) -> str:
+    name = str(entry["name"])
+    meta = raw.get("meta") if isinstance(raw.get("meta"), dict) else {}
+    title = str(meta.get("display_name") or raw.get("description") or name).splitlines()[0]
+    parts = [generated_header(entry), f"# {title}\n\n"]
+    parts.append(
+        "This reference is the portable Agent Skill projection of the source definition. "
+        "Execute SQL with `perfetto_query.py`; bind declared scalar or JSON-array "
+        "inputs through `--param`, "
+        "load prerequisites through `--module`, and pass non-empty saved rows from prior "
+        "steps through `--result`; dotted fields and numeric indexes select saved scalar "
+        "values. Evaluate conditions and dependent Skill calls in the "
+        "listed order.\n\n"
+    )
+    overview = {
+        key: raw.get(key)
+        for key in ("name", "version", "type", "category", "tier", "description", "tags", "optional", "priority")
+        if raw.get(key) is not None
+    }
+    parts.append(markdown_section("Overview", overview))
+    for heading, key in (
+        ("Metadata", "meta"),
+        ("Triggers", "triggers"),
+        ("Prerequisites", "prerequisites"),
+        ("Inputs", "inputs"),
+        ("Identity requirements", "identity"),
+        ("Context requirements", "context"),
+        ("Module contract", "module"),
+        ("Detection", "detection"),
+        ("Teaching model", "teaching"),
+        ("Analysis guidance", "analysis"),
+        ("Comparison contract", "comparison"),
+    ):
+        value = portable_inputs(raw) if key == "inputs" else raw.get(key)
+        parts.append(markdown_section(heading, value))
+
+    root_sql = raw.get("sql")
+    if root_sql is not None:
+        if not isinstance(root_sql, str) or not root_sql.strip():
+            raise ExportError(f"Empty root SQL in {name}")
+        relative = Path("sql") / safe_component(name, "Skill") / "query.sql"
+        destination_key = relative.as_posix()
+        if destination_key in sql_destinations:
+            raise ExportError(f"Generated SQL collision: {destination_key}")
+        sql_destinations.add(destination_key)
+        write_generated_text(
+            generated_root / relative,
+            generated_header(entry, "--") + "\n" + root_sql.strip() + "\n",
+        )
+        parts.append(
+            "## Query\n\n"
+            f"Run [`../{relative.as_posix()}`](../{relative.as_posix()}) with the declared inputs.\n\n"
+        )
+
+    steps = raw.get("steps")
+    if steps is not None:
+        if not isinstance(steps, list):
+            raise ExportError(f"Steps must be an array in {name}")
+        parts.append("## Ordered execution\n\n")
+        for step in steps:
+            if not isinstance(step, dict):
+                raise ExportError(f"Step must be an object in {name}: {step!r}")
+            parts.append(
+                render_step(
+                    step,
+                    name,
+                    entry,
+                    generated_root,
+                    sql_destinations,
+                )
+            )
+
+    for heading, key in (
+        ("Output and evidence contract", "output"),
+        ("Display metadata", "display"),
+        ("Thresholds", "thresholds"),
+        ("Diagnostics", "diagnostics"),
+        ("Synthesis", "synthesis"),
+    ):
+        parts.append(markdown_section(heading, raw.get(key)))
+    if raw.get("auto_pin"):
+        parts.append(
+            "## Optional UI metadata\n\n"
+            "The following auto-pin instructions are SmartPerfetto UI hints. They are optional in a portable agent workflow.\n\n"
+        )
+        parts.append(yaml_block(raw["auto_pin"]) + "\n")
+    return "".join(parts).rstrip() + "\n"
+
+
+_SQL_LIST_PARAMETER = re.compile(
+    r"\bIN\s*\(\s*\$\{([A-Za-z_][A-Za-z0-9_]*)(?:\|[^}]*)?\}\s*\)",
+    re.IGNORECASE,
+)
+
+
+def portable_inputs(raw: dict[str, Any]) -> object:
+    inputs = raw.get("inputs")
+    if not isinstance(inputs, list):
+        return inputs
+
+    list_parameters: set[str] = set()
+
+    def visit(value: object) -> None:
+        if isinstance(value, str):
+            list_parameters.update(_SQL_LIST_PARAMETER.findall(value))
+        elif isinstance(value, dict):
+            for nested in value.values():
+                visit(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                visit(nested)
+
+    visit(raw)
+    rendered: list[object] = []
+    for value in inputs:
+        if not isinstance(value, dict) or value.get("name") not in list_parameters:
+            rendered.append(value)
+            continue
+        item = dict(value)
+        item["source_type"] = item.get("type")
+        item["type"] = "json_array"
+        if item.get("description"):
+            item["source_description"] = item["description"]
+        item["description"] = (
+            "Portable binding: pass a JSON array through --param; do not pass a "
+            "preformatted SQL list."
+        )
+        rendered.append(item)
+    return rendered
+
+
+_SIGNAL_PATTERN = re.compile(
+    r"\b(?:name|track_name|thread_name|process_name)\s+"
+    r"(?:GLOB|LIKE|=)\s*'([^']+)'",
+    re.IGNORECASE,
+)
+
+
+def write_json(path: Path, value: object) -> None:
+    write_text_atomic(
+        path,
+        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    )
+
+
+_BOOLEAN_WORD = re.compile(r"\b(AND|OR)\b", re.I)
+_STRING_LITERAL = re.compile(r"'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\"")
+
+
+def normalize_condition(condition: str) -> str:
+    """Rewrite an iterator filter's AND/OR as && / ||, as SmartPerfetto does.
+
+    SmartPerfetto rewrites AND/OR only in iterator filters; a step or rule
+    condition with them never compiles there and validate:skills rejects it
+    (condition_uses_sql_boolean_words), so conditions are published as written.
+
+    SmartPerfetto rewrites every match, quoted text included, so an AND/OR
+    inside a string literal already means something else there; refuse it.
+    """
+    if any(_BOOLEAN_WORD.search(literal) for literal in _STRING_LITERAL.findall(condition)):
+        raise ExportError(f"AND/OR inside a string literal is rewritten by SmartPerfetto: {condition!r}")
+    return _BOOLEAN_WORD.sub(lambda match: "&&" if match.group(1).lower() == "and" else "||", condition)
+
+
+def validate_conditions(value: object, label: str) -> int:
+    count = 0
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if key == "condition" and isinstance(nested, str):
+                try:
+                    validate_expression(nested)
+                except ValueError as exc:
+                    raise ExportError(f"Unsupported condition in {label}: {nested!r}: {exc}") from exc
+                count += 1
+            count += validate_conditions(nested, label)
+    elif isinstance(value, list):
+        for nested in value:
+            count += validate_conditions(nested, label)
+    return count
+
+
+def validate_runtime_expressions(step: dict[str, Any], label: str) -> None:
+    """Check the published step with the portable runtime's own list of what it
+    evaluates, so an unsupported construct fails the export, not a public run."""
+    for field, value, check in step_expressions(step):
+        try:
+            check(value)
+        except ValueError as exc:
+            raise ExportError(f"Unsupported {field} in {label}: {value!r}: {exc}") from exc
+
+
+def referenced_sql_fragments(value: Any) -> set[str]:
+    """Policy paths of every `sql_fragments` entry anywhere in a Skill definition."""
+    found: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "sql_fragments" and isinstance(item, list):
+                found.update(
+                    posixpath.normpath(posixpath.join("backend/skills", str(ref))) for ref in item
+                )
+            else:
+                found |= referenced_sql_fragments(item)
+    elif isinstance(value, list):
+        for item in value:
+            found |= referenced_sql_fragments(item)
+    return found
+
+
+def expand_sql_fragments(
+    sql: str,
+    fragment_paths: list[str],
+    source: Path,
+) -> tuple[str, list[dict[str, Any]]]:
+    fragments: list[str] = []
+    metadata: list[dict[str, Any]] = []
+    for order, relative in enumerate(fragment_paths):
+        path = (source / "backend" / "skills" / relative).resolve()
+        skills_root = (source / "backend" / "skills").resolve()
+        if skills_root not in path.parents or not path.is_file():
+            raise ExportError(f"Missing or unsafe SQL fragment: {relative}")
+        content = path.read_text(encoding="utf-8").strip()
+        fragments.append(content)
+        metadata.append(
+            {
+                "order": order,
+                "source_path": path.relative_to(source).as_posix(),
+                "source_sha256": sha256_file(path),
+            }
+        )
+    if not fragments:
+        return sql.strip(), metadata
+    # Keep every CTE separator on its own line. A fragment may end with a
+    # `-- MARKER_END` comment; appending the comma to that line makes SQLite
+    # ignore it and leaves the next CTE syntactically unseparated.
+    block = "\n,\n".join(fragments)
+    trimmed = sql.lstrip()
+    # Mirror SmartPerfetto's injectFragmentCtes: leading line and block
+    # comments are kept in front of the composed WITH clause.
+    no_comments = re.sub(r"^(?:(?:--[^\n]*(?:\n|$)|/\*.*?\*/)\s*)*", "", trimmed, flags=re.S)
+    match = re.match(r"^WITH(?:\s+(RECURSIVE))?\s+", no_comments, flags=re.I)
+    if match:
+        prefix = trimmed[: len(trimmed) - len(no_comments)]
+        recursive = " RECURSIVE" if match.group(1) else ""
+        return f"{prefix}WITH{recursive}\n{block}\n,\n{no_comments[match.end():]}", metadata
+    return f"WITH\n{block}\n{trimmed}", metadata
+
+
+def query_validation(
+    query_id: str,
+    fixture_assertions: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    assertions = fixture_assertions.get(query_id, [])
+    return {
+        "static_valid": True,
+        "runtime_compatible": True if assertions else None,
+        "execution_verified": bool(assertions),
+        "semantic_verified": bool(assertions),
+        "fixtures": sorted({str(item["fixture_id"]) for item in assertions}),
+        "default_execution": (
+            "verified" if assertions else "capability_gate_required"
+        ),
+    }
+
+
+def android_query_matrix(
+    query_id: str,
+    fixture_assertions: dict[str, list[dict[str, Any]]],
+) -> dict[str, dict[str, Any]]:
+    verified_by_api: dict[int, list[str]] = {}
+    for assertion in fixture_assertions.get(query_id, []):
+        api = assertion.get("api")
+        if isinstance(api, int):
+            verified_by_api.setdefault(api, []).append(str(assertion["fixture_id"]))
+    return {
+        str(api): (
+            {"status": "verified", "fixtures": sorted(verified_by_api[api])}
+            if api in verified_by_api
+            else {
+                "status": "capability_gated",
+                "reason": "No exact API semantic fixture; runtime capability proof required",
+            }
+        )
+        for api in ANDROID_API_LEVELS
+    }
+
+
+def load_fixture_manifest(source: Path, catalog: dict[str, Any]) -> tuple[dict[str, Any], dict[str, list[dict[str, Any]]]]:
+    fixture_source = source / str(catalog["fixture_manifest_source"])
+    raw = load_yaml(fixture_source)
+    fixtures = raw.get("fixtures")
+    if not isinstance(fixtures, list):
+        raise ExportError("Fixture manifest fixtures must be an array")
+    rendered: list[dict[str, Any]] = []
+    assertions: dict[str, list[dict[str, Any]]] = {}
+    for fixture in fixtures:
+        if not isinstance(fixture, dict) or not isinstance(fixture.get("id"), str):
+            raise ExportError("Fixture manifest contains an invalid fixture")
+        item = json.loads(json.dumps(fixture))
+        source_path = source / str(item["source"])
+        if source_path.is_file():
+            actual = sha256_file(source_path)
+            expected = item.get("sha256")
+            if expected and expected != actual:
+                raise ExportError(f"Fixture checksum mismatch: {item['id']}")
+            item["sha256"] = actual
+        checksum_source = item.pop("checksum_source", None)
+        if checksum_source:
+            checksum_path = source / str(checksum_source)
+            if not checksum_path.is_file():
+                raise ExportError(f"Fixture checksum source missing: {checksum_source}")
+            match = re.search(r"[0-9a-fA-F]{64}", checksum_path.read_text(encoding="utf-8"))
+            if not match:
+                raise ExportError(f"Fixture checksum source invalid: {checksum_source}")
+            item["sha256"] = match.group(0).lower()
+            item["checksum_source"] = str(checksum_source)
+        if not re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256", ""))):
+            raise ExportError(f"Fixture has no SHA-256: {item['id']}")
+        for assertion in item.get("assertions", []):
+            query_id = assertion.get("query_id")
+            if not isinstance(query_id, str):
+                raise ExportError(f"Fixture assertion has no query_id: {item['id']}")
+            assertions.setdefault(query_id, []).append(
+                {
+                    **assertion,
+                    "fixture_id": item["id"],
+                    "api": item.get("android", {}).get("api"),
+                }
+            )
+        rendered.append(item)
+    return (
+        {
+            "schema_version": 1,
+            "source_path": catalog["fixture_manifest_source"],
+            "source_sha256": sha256_file(fixture_source),
+            "fixtures": rendered,
+        },
+        assertions,
+    )
+
+
+def git_file_bytes(repository: Path, revision: str, path: str) -> bytes:
+    completed = subprocess.run(
+        ["git", "show", f"{revision}:{path}"],
+        cwd=repository,
+        check=False,
+        capture_output=True,
+    )
+    if completed.returncode != 0:
+        raise ExportError(f"Cannot read {revision}:{path} from {repository}")
+    return completed.stdout
+
+
+def build_perfetto_source_lock(
+    source: Path, catalog: dict[str, Any], *, skill_root: Path = SKILL_ROOT
+) -> dict[str, Any]:
+    official_policy = dict(catalog["official_perfetto"])
+    runtime_policy = dict(catalog["runtime_perfetto"])
+    perfetto = source / "perfetto"
+    tag = str(official_policy["tag"])
+    commit = git_output(perfetto, "rev-parse", f"{tag}^{{}}")
+    if commit != official_policy["commit"]:
+        raise ExportError(f"Canonical Perfetto tag mismatch: {tag} -> {commit}")
+    stdlib_path = "src/trace_processor/perfetto_sql/stdlib"
+    official_stdlib_tree = git_output(perfetto, "rev-parse", f"{tag}:{stdlib_path}")
+    if official_stdlib_tree != official_policy["stdlib_tree"]:
+        raise ExportError(f"Canonical Perfetto stdlib tree mismatch: {official_stdlib_tree}")
+    official_path = str(official_policy["official_skill_reference"])
+    official_bytes = git_file_bytes(perfetto, tag, official_path)
+
+    revision = str(runtime_policy["revision"])
+    runtime_commit = git_output(perfetto, "rev-parse", f"{revision}^{{commit}}")
+    if runtime_commit != revision:
+        raise ExportError(f"Perfetto runtime revision is not an exact commit: {revision}")
+    runtime_stdlib_tree = git_output(perfetto, "rev-parse", f"{revision}:{stdlib_path}")
+    if runtime_stdlib_tree != runtime_policy["stdlib_tree"]:
+        raise ExportError(f"Runtime Perfetto stdlib tree mismatch: {runtime_stdlib_tree}")
+    lock_path = skill_root / "references" / "trace-processor-lock.json"
+    binary_lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    if binary_lock.get("schema_version") != 2:
+        raise ExportError("Trace processor artifact lock schema is unsupported")
+    if binary_lock.get("revision") != revision:
+        raise ExportError("Trace processor artifact lock does not match runtime revision")
+    if binary_lock.get("reported_version") != runtime_policy["reported_version"]:
+        raise ExportError("Trace processor reported version does not match runtime")
+    if binary_lock.get("rpc_api_version") != runtime_policy["rpc_api_version"]:
+        raise ExportError("Trace processor RPC API does not match runtime")
+    symbol_path = source / "backend" / "data" / "perfettoStdlibSymbols.json"
+    docs_path = source / "backend" / "data" / "perfettoSqlDocs.json"
+    for generated_path in (symbol_path, docs_path):
+        try:
+            generated_payload = json.loads(generated_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ExportError(
+                f"Cannot validate generated Perfetto asset {generated_path.name}: {error}"
+            ) from error
+        if not isinstance(generated_payload, dict) or generated_payload.get("generatedFrom") != revision:
+            raise ExportError(
+                f"{generated_path.name} generatedFrom does not match runtime revision {revision}"
+            )
+    return {
+        "schema_version": 2,
+        "repository": runtime_policy["repository"],
+        "official_reference": {
+            "tag": tag,
+            "commit": commit,
+            "rpc_api_version": official_policy["rpc_api_version"],
+            "stdlib_tree": official_stdlib_tree,
+            "skill": {
+                "role": official_policy["official_skill_role"],
+                "path": official_path,
+                "sha256": hashlib.sha256(official_bytes).hexdigest(),
+                "runtime_dependency": False,
+            },
+        },
+        "runtime": {
+            "reported_version": runtime_policy["reported_version"],
+            "revision": revision,
+            "rpc_api_version": runtime_policy["rpc_api_version"],
+            "stdlib_tree": runtime_stdlib_tree,
+        },
+        "runtime_substrate": {
+            "trace_processor_lock": "../../../trace-processor-lock.json",
+            "trace_processor_lock_sha256": sha256_file(lock_path),
+            "platforms": binary_lock["platforms"],
+            "required_runtime_checks": ["artifact_sha256", "version_commit", "rpc_api_version"],
+        },
+        "generated_indexes": {
+            "stdlib_symbols_sha256": sha256_file(symbol_path),
+            "stdlib_docs_sha256": sha256_file(docs_path),
+        },
+        "canary": {
+            "tag": runtime_policy.get("latest_canary_tag"),
+            "commit": runtime_policy.get("latest_canary_commit"),
+            "release_blocking": False,
+            "stdlib_tree_matches_runtime": True,
+        },
+    }
+
+
+def persistent_objects(sql: str) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    created = [
+        {"kind": match.group("kind").lower(), "name": match.group("name")}
+        for match in PERSISTENT_OBJECT.finditer(sql)
+    ]
+    dropped = [
+        {"kind": match.group("kind").lower(), "name": match.group("name")}
+        for match in DROP_OBJECT.finditer(sql)
+    ]
+    return created, dropped
+
+
+def android_adapters(modules: list[str], sql_text: str) -> list[dict[str, Any]]:
+    adapters: list[dict[str, Any]] = []
+    joined = " ".join(modules) + " " + sql_text
+    if "android.startup" in joined:
+        adapters.append(
+            {
+                "id": "official_android_startup_tags",
+                "branches": ["api<=28", "api29-32", "api>=33"],
+                "source": "perfetto stdlib android/startup/startups.sql",
+            }
+        )
+    if "frame_timeline" in joined or "android.frames" in joined:
+        adapters.append(
+            {
+                "id": "official_frame_timeline_or_legacy",
+                "version_hint": {"frame_timeline_min_api": 31},
+                "selection": "actual rows first; legacy Choreographer/DrawFrame fallback",
+                "source": "perfetto stdlib android/frames/timeline.sql",
+            }
+        )
+    if "android_input" in joined or "android.input" in joined:
+        adapters.append(
+            {
+                "id": "android_input_source",
+                "version_hint": {"proto_input_min_api_hint": 34},
+                "selection": "data-source descriptor, build type, config, then rows",
+            }
+        )
+    if any(token in joined for token in ("sched", "ftrace", "irq", "cpu_frequency")):
+        adapters.append(
+            {
+                "id": "kernel_tracepoints",
+                "selection": "available events, trace config/setup errors, schema, then rows",
+            }
+        )
+    return adapters
+
+
+# The tables whose recorded rows the probe's `gpu` capability measures.
+GPU_CAPABILITY_TABLES = ("gpu_slice", "gpu_track")
+_SQL_COMMENT_OR_STRING = re.compile(r"--[^\n]*|/\*.*?\*/|'(?:[^']|'')*'", re.DOTALL)
+
+
+# SmartPerfetto's effective process identity contract: the policy each
+# built-in Skill gets (backend/src/services/processIdentity/identityGate.ts),
+# recorded by SmartPerfetto in backend/skills/identity-policy.catalog.json.
+# Reading it keeps one implementation of the decision, which reads SQL
+# structure (qualified names, wrappers, query blocks, CTE columns).
+IDENTITY_POLICY_CATALOG = Path("backend") / "skills" / "identity-policy.catalog.json"
+
+
+def identity_policy_reader(source: Path) -> Callable[[str], dict[str, Any]]:
+    """The effective identity policy of each SmartPerfetto Skill, by id; a Skill it does not list is an error."""
+    path = source / IDENTITY_POLICY_CATALOG
+    if not path.is_file():
+        raise ExportError(f"SmartPerfetto source has no {IDENTITY_POLICY_CATALOG.as_posix()}")
+    catalog = json.loads(path.read_text(encoding="utf-8"))
+    policies = catalog.get("skills") if catalog.get("schemaVersion") == 1 else None
+    if not isinstance(policies, dict):
+        raise ExportError(f"Unsupported {IDENTITY_POLICY_CATALOG.as_posix()} schema")
+
+    def read(skill_id: str) -> dict[str, Any]:
+        policy = policies.get(skill_id)
+        if not isinstance(policy, dict) or not isinstance(policy.get("policy"), str):
+            raise ExportError(f"{IDENTITY_POLICY_CATALOG.as_posix()} has no identity policy for {skill_id}")
+        return dict(policy)
+
+    return read
+
+
+# SmartPerfetto's processScopeSql.ts: whether one SQL source can run under an
+# exact UPID scope (sqlScopeDeclarationError), with its reason texts.
+EFFECTIVE_TARGET_FRAGMENT = "fragments/effective_target_processes.sql"
+EXACT_UPID_TOKEN = "${__process_scope.upid}"
+_SCOPE_CONTEXT_ROLES = ("global_context", "peer_context", "identity_metadata")
+_SQL_COMMENTS_AND_LITERALS = re.compile(r"--[^\n\r]*|/\*[\s\S]*?\*/|'(?:''|[^'])*'")
+
+
+def sql_scope_declaration_error(source: dict[str, Any], fragment_text: Callable[[str], str | None]) -> str | None:
+    declaration = source.get("process_scope")
+    if not declaration:
+        return "SQL has no process_scope declaration"
+    role = declaration.get("role")
+    if role not in ("target", *_SCOPE_CONTEXT_ROLES):
+        return "Unknown process_scope role"
+    if "exact_unavailable" in declaration and declaration["exact_unavailable"] is not None:
+        reason = declaration["exact_unavailable"]
+        return None if isinstance(reason, str) and reason.strip() else "exact_unavailable requires an authored reason"
+    for context_role, fields in (declaration.get("context_fields") or {}).items():
+        if context_role not in _SCOPE_CONTEXT_ROLES or not isinstance(fields, list) or any(
+            not isinstance(field, str) or not field.strip() for field in fields
+        ):
+            return "Invalid process_scope context_fields declaration"
+    paths = [str(path) for path in source.get("sql_fragments") or []]
+    texts: dict[str, str] = {}
+    for path in paths:
+        text = fragment_text(path)
+        if text is None:
+            return f"Required SQL fragment is missing: {path}"
+        texts[path] = text
+    if role in _SCOPE_CONTEXT_ROLES:
+        return "Context evidence cannot claim a target UPID binding" if declaration.get("binding") else None
+    executable = _SQL_COMMENTS_AND_LITERALS.sub(" ", "\n".join([str(source.get("sql") or ""), *texts.values()]))
+    binding = declaration.get("binding")
+    if binding == "native_upid":
+        return None if EXACT_UPID_TOKEN in executable else "native_upid SQL must bind the trusted __process_scope.upid"
+    if binding == "effective_target_processes":
+        if EFFECTIVE_TARGET_FRAGMENT not in paths:
+            return "Target SQL must include effective_target_processes.sql"
+        if EXACT_UPID_TOKEN not in executable:
+            return "Target fragment is missing its trusted UPID binding"
+        consumer = _SQL_COMMENTS_AND_LITERALS.sub(" ", "\n".join(
+            [str(source.get("sql") or ""), *(text for path, text in texts.items() if path != EFFECTIVE_TARGET_FRAGMENT)]
+        ))
+        return None if re.search(r"\b(?:FROM|JOIN)\s+effective_target_processes\b", consumer, re.IGNORECASE) else (
+            "Target SQL does not consume effective_target_processes"
+        )
+    return "Target SQL has no supported exact UPID binding"
+
+
+def exact_scope_status(selected: dict[str, Any], fragment_text: Callable[[str], str | None]) -> dict[str, Any]:
+    """The exact-scope admission record of the SQL source an exact scope runs."""
+    reason = sql_scope_declaration_error(selected, fragment_text)
+    return {"status": "unsupported", "reason": reason} if reason else {"status": "supported"}
+
+
+def builtin_fragment_reader(source: Path) -> Callable[[str], str | None]:
+    """SmartPerfetto's builtInSkillFragment: a declared fragment's text, or None."""
+    root = (source / "backend" / "skills" / "fragments").resolve()
+
+    def read(fragment_path: str) -> str | None:
+        path = (root / re.sub(r"^fragments/", "", fragment_path)).resolve()
+        if root not in path.parents or not path.is_file():
+            return None
+        return path.read_text(encoding="utf-8")
+
+    return read
+
+
+def probe_capabilities(
+    query_id: str,
+    required_tables: list[str],
+    sql: str = "",
+) -> list[str]:
+    """Capabilities whose probe evidence a query needs before it may run.
+
+    A query is gated on `gpu` only when it reads a table that capability
+    measures; a GPU-named query over other tracks (work periods, frequency
+    counters, Mali power states) runs like any other query and reports empty
+    rows itself. heap_graph stays gated by name as well, deliberately.
+    """
+    lowered_id = query_id.lower()
+    lowered_tables = {table.lower() for table in required_tables}
+    code = _SQL_COMMENT_OR_STRING.sub(" ", sql).lower()
+    capabilities: set[str] = set()
+    if any(
+        table in lowered_tables or re.search(rf"\b{table}\b", code)
+        for table in GPU_CAPABILITY_TABLES
+    ):
+        capabilities.add("gpu")
+    if any("heap_graph" in table for table in lowered_tables) or "heap_graph" in lowered_id:
+        capabilities.add("heap_graph")
+    table_mapping = {
+        "slice": "slices",
+        "thread_state": "thread_states",
+        "sched": "scheduling",
+        "counter": "counters",
+        "counter_track": "counters",
+        "actual_frame_timeline_slice": "frame_timeline",
+        "expected_frame_timeline_slice": "frame_timeline",
+        "args": "arguments",
+    }
+    for table, capability in table_mapping.items():
+        if table in lowered_tables:
+            capabilities.add(capability)
+    return sorted(capabilities)
+
+
+def step_displayed(step: dict[str, Any]) -> bool:
+    """SmartPerfetto's `shouldDisplay`: `display: true`, or a display object
+    that is neither `show: false` nor `level: none` (`hidden` is displayed)."""
+    display = step.get("display")
+    if isinstance(display, bool):
+        return display
+    return isinstance(display, dict) and display.get("show") is not False and display.get("level") != "none"
+
+
+def normalize_step(
+    step: dict[str, Any],
+    skill_id: str,
+    source: Path,
+    generated_root: Path,
+    source_entry: dict[str, Any],
+    modules: list[str],
+    result_names: set[str],
+    setup_queries: list[str],
+    fixture_assertions: dict[str, list[dict[str, Any]]],
+    object_producers: dict[str, str],
+    identity: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    step_id = safe_component(step.get("id"), f"{skill_id} step")
+    step_type = infer_step_type(step, skill_id)
+    kept = {
+        key: value
+        for key, value in step.items()
+        if key
+        in {
+            "id", "name", "description", "optional", "on_empty", "condition",
+            "save_as", "save_from", "skill", "params", "source", "item_skill", "item_params",
+            "max_items", "filter", "inputs", "rules", "ai_assist", "fallback",
+            "prompt", "for_each", "process_scope",
+        }
+    }
+    kept["type"] = step_type
+    # Only whether SmartPerfetto displays the step is portable: a parent that
+    # reads this Skill by default prefers a displayed step's data.
+    if step_displayed(step):
+        kept["displayed"] = True
+    # SmartPerfetto rewrites AND/OR in iterator filters only.
+    if isinstance(kept.get("filter"), str):
+        kept["filter"] = normalize_condition(str(kept["filter"]))
+    validate_runtime_expressions(kept, f"{skill_id}.{step_id}")
+    if "sql" not in step:
+        return kept, None
+    fragment_paths = [str(value) for value in step.get("sql_fragments", []) or []]
+    expanded, fragment_metadata = expand_sql_fragments(str(step["sql"]), fragment_paths, source)
+    relative = Path("sql") / safe_component(skill_id, "Skill") / f"{step_id}.sql"
+    write_generated_text(
+        generated_root / relative,
+        generated_header(source_entry, "--") + "\n" + expanded + "\n",
+    )
+    query_id = f"{skill_id}/{step_id}"
+    kept["query_id"] = query_id
+    created, dropped = persistent_objects(expanded)
+    created_names = {item["name"] for item in created}
+    required_objects = sorted(
+        name
+        for name in object_producers
+        if name not in created_names and re.search(rf"\b{re.escape(name)}\b", expanded)
+    )
+    dependency_setups = [object_producers[name] for name in required_objects]
+    parameters, result_references, result_dependencies = sql_template_roots(expanded, result_names)
+    scope = step.get("process_scope")
+    try:
+        runtime_bindings = runtime_sql_bindings(expanded)
+        if "process_scope" in step:
+            validate_process_scope_declaration(scope)
+        elif runtime_bindings:
+            raise ValueError("process scope declaration is required")
+    except ValueError as error:
+        raise ExportError(f"Invalid process scope in {query_id}: {error}") from error
+    identity = identity if identity is not None else {"policy": "none"}
+    kept["result_dependencies"] = result_dependencies
+    query = {
+        "id": query_id,
+        "skill_id": skill_id,
+        "step_id": step_id,
+        "path": relative.as_posix(),
+        "sha256": sha256_file(generated_root / relative),
+        "source": {
+            "repository": "https://github.com/Gracker/SmartPerfetto",
+            "path": source_entry["source_path"],
+            "sha256": source_entry["source_sha256"],
+        },
+        "template": {
+            "parameters": parameters,
+            "result_references": result_references,
+            "result_dependencies": result_dependencies,
+            "fragments": fragment_metadata,
+            "runtime_bindings": runtime_bindings,
+            "name_parameters": sorted(sql_template_names(expanded) & set(identity.get("aliases", []))),
+        },
+        "identity": identity,
+        "sql_dependencies": {
+            "declared_modules": modules,
+            "required_tables": [],
+            "creates": created,
+            "drops": dropped,
+            "requires": required_objects,
+            "setup_queries": list(dict.fromkeys([*setup_queries, *dependency_setups])),
+        },
+        "signal_patterns": sorted(set(_SIGNAL_PATTERN.findall(expanded))),
+        "compatibility": {
+            "android": android_query_matrix(query_id, fixture_assertions),
+            "probe_capabilities": probe_capabilities(query_id, [], expanded),
+        },
+        "validation": query_validation(query_id, fixture_assertions),
+        "license": {"origin": "smartperfetto", "spdx": "AGPL-3.0-or-later"},
+    }
+    if scope is not None:
+        query["process_scope"] = scope
+    fragment_text = builtin_fragment_reader(source)
+    if "exact_sql" in step:
+        exact = step["exact_sql"]
+        if not isinstance(exact, dict) or not isinstance(exact.get("sql"), str) or not isinstance(exact.get("process_scope"), dict):
+            raise ExportError(f"Invalid exact_sql declaration in {query_id}")
+        try:
+            validate_process_scope_declaration(exact["process_scope"])
+        except ValueError as error:
+            raise ExportError(f"Invalid exact_sql declaration in {query_id}: {error}") from error
+        # An exact scope runs this SQL instead (SmartPerfetto's selectProcessScopeSql).
+        variant_step = {
+            "id": f"{step_id}.exact", "type": "atomic", "sql": exact["sql"],
+            **{key: exact[key] for key in ("sql_fragments", "process_scope") if key in exact},
+        }
+        _kept, variant = normalize_step(
+            variant_step, skill_id, source, generated_root, source_entry, modules,
+            result_names, list(setup_queries), fixture_assertions, object_producers, identity,
+        )
+        assert variant is not None
+        variant["exact_variant_of"] = query_id
+        query["compatibility"]["exact_scope"] = {**variant["compatibility"]["exact_scope"], "exact_query_id": variant["id"]}
+        query["exact_variant"] = variant
+        kept["exact"] = {
+            "query_id": variant["id"],
+            "result_dependencies": variant["template"]["result_dependencies"],
+        }
+    else:
+        query["compatibility"]["exact_scope"] = exact_scope_status(step, fragment_text)
+    if created:
+        setup_queries.append(query_id)
+    return kept, query
+
+
+def declared_input_names(raw: dict[str, Any]) -> frozenset[str]:
+    """The inputs `perfetto_skill.py run` binds; it ignores any other `--param`."""
+    inputs = portable_inputs(raw)
+    return frozenset(
+        str(value["name"])
+        for value in (inputs if isinstance(inputs, list) else [])
+        if isinstance(value, dict) and isinstance(value.get("name"), str)
+    )
+
+
+def runtime_status(raw: dict[str, Any]) -> str:
+    """`knowledge_only` Skill types have no portable `perfetto_skill.py run` path."""
+    if str(raw.get("type", "unknown")) in {"pipeline_definition", "comparison"}:
+        return "knowledge_only"
+    return "executable"
+
+
+def build_runtime_assets(
+    source: Path,
+    catalog: dict[str, Any],
+    generated_root: Path,
+    *,
+    skill_root: Path = SKILL_ROOT,
+) -> dict[str, int]:
+    runtime_root = generated_root / "runtime"
+    fixture_manifest, fixture_assertions = load_fixture_manifest(source, catalog)
+    write_json(runtime_root / "fixture-manifest.json", fixture_manifest)
+    source_lock = build_perfetto_source_lock(source, catalog, skill_root=skill_root)
+    write_json(runtime_root / "perfetto-source-lock.json", source_lock)
+
+    symbol_source = source / "backend" / "data" / "perfettoStdlibSymbols.json"
+    symbol_index = json.loads(symbol_source.read_text(encoding="utf-8"))
+    stdlib_prefix = "src/trace_processor/perfetto_sql/stdlib/"
+    official_modules = {
+        path.removeprefix(stdlib_prefix).removesuffix(".sql").replace("/", ".")
+        for path in git_output(
+            source / "perfetto",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            str(source_lock["runtime"]["revision"]),
+            stdlib_prefix.rstrip("/"),
+        ).splitlines()
+        if path.endswith(".sql")
+    }
+    write_json(
+        runtime_root / "stdlib-symbols.json",
+        {
+            **symbol_index,
+            "source_sha256": sha256_file(symbol_source),
+            "runtime_reported_version": source_lock["runtime"]["reported_version"],
+            "runtime_revision": source_lock["runtime"]["revision"],
+            "runtime_stdlib_tree": source_lock["runtime"]["stdlib_tree"],
+        },
+    )
+
+    skills_index: dict[str, str] = {}
+    sql_shards: list[str] = []
+    android_index: dict[str, str] = {}
+    runtime_counts: Counter[str] = Counter()
+    total_queries = 0
+    total_steps = 0
+    total_conditions = 0
+    total_step_conditions = 0
+    execution_verified_queries: list[str] = []
+    semantic_verified_queries: list[str] = []
+    object_producers: dict[str, str] = {}
+    for source_entry in catalog["skills"]:
+        producer_skill_id = str(source_entry["name"])
+        producer_raw = load_yaml(source / source_entry["source_path"])
+        root_sql = producer_raw.get("sql")
+        if isinstance(root_sql, str):
+            for created, _dropped in [persistent_objects(root_sql)]:
+                for item in created:
+                    object_producers.setdefault(item["name"], f"{producer_skill_id}/root")
+        for producer_step in producer_raw.get("steps", []) or []:
+            if not isinstance(producer_step, dict) or not isinstance(producer_step.get("sql"), str):
+                continue
+            producer_step_id = safe_component(
+                producer_step.get("id"), f"{producer_skill_id} step"
+            )
+            created, _dropped = persistent_objects(str(producer_step["sql"]))
+            for item in created:
+                object_producers.setdefault(
+                    item["name"], f"{producer_skill_id}/{producer_step_id}"
+                )
+    identity_policy = identity_policy_reader(source)
+    for entry in catalog["skills"]:
+        skill_id = str(entry["name"])
+        raw = load_yaml(source / entry["source_path"])
+        skill_type = str(raw.get("type", "unknown"))
+        skill_status = runtime_status(raw)
+        runtime_counts[skill_status] += 1
+        modules = [str(value) for value in raw.get("prerequisites", {}).get("modules", []) or []]
+        unknown_modules = sorted(set(modules) - official_modules)
+        if unknown_modules:
+            raise ExportError(f"Unknown official modules in {skill_id}: {unknown_modules}")
+        inputs = portable_inputs(raw)
+        input_list = inputs if isinstance(inputs, list) else []
+        reject_process_scope_names({name: None for name in declared_input_names(raw)})
+        raw_steps = raw.get("steps", []) or []
+        if not isinstance(raw_steps, list):
+            raise ExportError(f"Steps must be an array in {skill_id}")
+        result_names = {
+            str(step.get("id"))
+            for step in raw_steps
+            if isinstance(step, dict) and step.get("id")
+        } | {
+            str(step.get("save_as"))
+            for step in raw_steps
+            if isinstance(step, dict) and step.get("save_as")
+        }
+        reject_process_scope_names({name: None for name in result_names})
+        identity = identity_policy(skill_id)
+        queries: list[dict[str, Any]] = []
+        normalized_steps: list[dict[str, Any]] = []
+        setup_queries: list[str] = []
+        root_query_id: str | None = None
+        root_exact: dict[str, Any] | None = None
+        root_sql = raw.get("sql")
+        if isinstance(root_sql, str) and root_sql.strip():
+            root_step = {
+                "id": "root", "type": "atomic", "sql": root_sql,
+                **{key: raw[key] for key in ("sql_fragments", "process_scope", "exact_sql") if key in raw},
+            }
+            normalized_root, query = normalize_step(
+                root_step, skill_id, source, generated_root, entry, modules,
+                result_names, setup_queries, fixture_assertions,
+                object_producers, identity,
+            )
+            root_query_id = normalized_root["query_id"]
+            root_exact = normalized_root.get("exact")
+            assert query is not None
+            query["path"] = query["path"].replace("/root.sql", "/query.sql")
+            old = generated_root / "sql" / safe_component(skill_id, "Skill") / "root.sql"
+            expected = generated_root / "sql" / safe_component(skill_id, "Skill") / "query.sql"
+            if old.exists():
+                os.replace(old, expected)
+                query["sha256"] = sha256_file(expected)
+            queries.append(query)
+        for raw_step in raw_steps:
+            if not isinstance(raw_step, dict):
+                raise ExportError(f"Step must be an object in {skill_id}")
+            normalized, query = normalize_step(
+                raw_step, skill_id, source, generated_root, entry, modules,
+                result_names, setup_queries, fixture_assertions,
+                object_producers, identity,
+            )
+            normalized_steps.append(normalized)
+            if query:
+                query["sql_dependencies"]["required_tables"] = [
+                    str(value)
+                    for value in raw.get("prerequisites", {}).get("required_tables", []) or []
+                ]
+                queries.append(query)
+        skill_required_tables = [
+            str(value)
+            for value in raw.get("prerequisites", {}).get("required_tables", []) or []
+        ]
+        # An exact_sql variant is a query of its own, selected under an exact scope.
+        queries = [
+            item for query in queries
+            for item in (query, *([query.pop("exact_variant")] if "exact_variant" in query else []))
+        ]
+        for query in queries:
+            query["sql_dependencies"]["required_tables"] = skill_required_tables
+            query["compatibility"]["probe_capabilities"] = probe_capabilities(
+                str(query["id"]), skill_required_tables,
+                (generated_root / str(query["path"])).read_text(encoding="utf-8"),
+            )
+        condition_count = validate_conditions(raw_steps, skill_id)
+        total_conditions += condition_count
+        total_step_conditions += sum(
+            1
+            for step in raw_steps
+            if isinstance(step, dict) and isinstance(step.get("condition"), str)
+        )
+        total_steps += len(raw_steps)
+        sql_text = "\n".join(
+            str(step.get("sql", "")) for step in raw_steps if isinstance(step, dict)
+        ) + (str(root_sql) if isinstance(root_sql, str) else "")
+        adapters = android_adapters(modules, sql_text)
+        required_tables = skill_required_tables
+        skill_manifest = {
+            "schema_version": 1,
+            "id": skill_id,
+            "version": str(raw.get("version", "1.0")),
+            "type": skill_type,
+            "runtime_status": skill_status,
+            "workflow": entry.get("workflow"),
+            "source": {
+                "path": entry["source_path"],
+                "sha256": entry["source_sha256"],
+            },
+            "inputs": input_list,
+            "prerequisites": {"modules": modules, "required_tables": required_tables},
+            "identity": identity,
+            "steps": normalized_steps,
+            "query_id": root_query_id,
+            "android": {
+                "adapters": adapters,
+                "selection_order": [
+                    "device_capability", "trace_config_and_setup_errors",
+                    "engine_module_and_schema", "target_range_row_coverage",
+                    "api_hint",
+                ],
+                "signal_patterns": sorted(set(_SIGNAL_PATTERN.findall(sql_text))),
+            },
+        }
+        if "process_scope" in raw:
+            skill_manifest["process_scope"] = raw["process_scope"]
+        if root_exact:
+            skill_manifest["exact"] = root_exact
+        skill_relative = f"skills/{safe_component(skill_id, 'Skill')}.json"
+        write_json(runtime_root / skill_relative, skill_manifest)
+        skills_index[skill_id] = skill_relative
+
+        query_relative = f"queries/{safe_component(skill_id, 'Skill')}.json"
+        write_json(
+            runtime_root / query_relative,
+            {"schema_version": 1, "skill_id": skill_id, "queries": queries},
+        )
+        sql_shards.append(query_relative)
+        total_queries += len(queries)
+        execution_verified_queries.extend(
+            query["id"] for query in queries if query["validation"]["execution_verified"]
+        )
+        semantic_verified_queries.extend(
+            query["id"] for query in queries if query["validation"]["semantic_verified"]
+        )
+
+        status = "not_applicable" if skill_status == "knowledge_only" else "capability_gated"
+        query_by_id = {str(query["id"]): query for query in queries}
+        android_manifest = {
+            "schema_version": 1,
+            "skill_id": skill_id,
+            "selection_order": skill_manifest["android"]["selection_order"],
+            "adapters": adapters,
+            "required_modules": modules,
+            "required_tables": required_tables,
+            "signal_patterns": skill_manifest["android"]["signal_patterns"],
+            "api": {
+                str(api): {
+                    "status": status,
+                    "reason": (
+                        "Metadata/reference Skill has no trace execution"
+                        if status == "not_applicable"
+                        else "Runtime capabilities are authoritative; no full-Skill exact API fixture"
+                    ),
+                }
+                for api in ANDROID_API_LEVELS
+            },
+            "steps": {
+                str(step["id"]): {
+                    "query_id": step.get("query_id"),
+                    "api": (
+                        query_by_id[str(step["query_id"])]["compatibility"]["android"]
+                        if step.get("query_id") in query_by_id
+                        else {
+                            str(api): {"status": status} for api in ANDROID_API_LEVELS
+                        }
+                    ),
+                }
+                for step in normalized_steps
+            },
+        }
+        android_relative = f"android/{safe_component(skill_id, 'Skill')}.json"
+        write_json(runtime_root / android_relative, android_manifest)
+        android_index[skill_id] = android_relative
+
+    write_json(
+        runtime_root / "skill-index.json",
+        {
+            "schema_version": 1,
+            "summary": {
+                "skills": len(skills_index),
+                "executable": runtime_counts["executable"],
+                "knowledge_only": runtime_counts["knowledge_only"],
+                "steps": total_steps,
+                "conditions": total_conditions,
+                "step_conditions": total_step_conditions,
+            },
+            "skills": skills_index,
+        },
+    )
+    write_json(
+        runtime_root / "sql-index.json",
+        {
+            "schema_version": 1,
+            "summary": {"queries": total_queries, "shards": len(sql_shards)},
+            "shards": sorted(sql_shards),
+        },
+    )
+    write_json(
+        runtime_root / "sql-validation-report.json",
+        {
+            "schema_version": 1,
+            "perfetto": source_lock["runtime"],
+            "summary": {
+                "queries": total_queries,
+                "static_valid": total_queries,
+                "execution_verified": len(execution_verified_queries),
+                "semantic_verified": len(semantic_verified_queries),
+                "capability_gated": total_queries - len(semantic_verified_queries),
+            },
+            "execution_verified_queries": sorted(execution_verified_queries),
+            "semantic_verified_queries": sorted(semantic_verified_queries),
+            "policy": {
+                "static_valid_is_not_semantic_proof": True,
+                "capability_gated_queries_may_not_support_causal_claims": True,
+                "unknown_or_unsupported_requires_explicit_override": True,
+            },
+        },
+    )
+    write_json(
+        runtime_root / "android-index.json",
+        {
+            "schema_version": 1,
+            "api_levels": list(ANDROID_API_LEVELS),
+            "capability_states": list(CAPABILITY_STATES),
+            "compatibility_statuses": ["verified", "capability_gated", "unsupported", "unknown", "not_applicable"],
+            "skills": android_index,
+        },
+    )
+
+    strategies = []
+    for entry in catalog["strategies"]:
+        disposition = entry["disposition"]
+        strategies.append(
+            {
+                "source_path": entry["source_path"],
+                "source_sha256": entry["source_sha256"],
+                "workflow": entry.get("workflow"),
+                "destination": entry.get("destination"),
+                "status": (
+                    "product_only"
+                    if disposition == "product-only"
+                    else "portable_transformed"
+                ),
+                "replacement": (
+                    entry.get("reason")
+                    if disposition == "product-only"
+                    else "manifest-backed Skill/query/evidence operations"
+                ),
+            }
+        )
+    write_json(
+        runtime_root / "strategy-index.json",
+        {
+            "schema_version": 1,
+            "summary": {"sources": len(strategies)},
+            "strategies": strategies,
+        },
+    )
+
+    for entry in catalog["sql_fragments"]:
+        if entry["disposition"] != "exported":
+            continue
+        source_path = source / entry["source_path"]
+        write_generated_text(
+            generated_root / destination_in_generated_root(entry["destination"]),
+            generated_header(entry, "--") + "\n" + source_path.read_text(encoding="utf-8"),
+        )
+    for entry in catalog["vendor_overrides"]:
+        raw = load_yaml(source / entry["source_path"])
+        write_json(
+            generated_root / destination_in_generated_root(entry["destination"]),
+            {
+                "schema_version": 1,
+                "application_mode": "advisory_only",
+                "source": {
+                    "path": entry["source_path"],
+                    "sha256": entry["source_sha256"],
+                },
+                "definition": raw,
+            },
+        )
+    return {
+        "runtime_skills": len(skills_index),
+        "runtime_queries": total_queries,
+        "runtime_conditions": total_conditions,
+    }
+
+
+def render_comparison_reference(entry: dict[str, Any]) -> str:
+    return (
+        generated_header(entry)
+        + "\n# File-based trace comparison\n\n"
+        + "The SmartPerfetto source definition uses product snapshot services. The portable "
+        "projection replaces that boundary with local JSON files and "
+        "`scripts/perfetto_compare.py`.\n\n"
+        + "## Inputs\n\n"
+        + "Analyze every trace independently, then write one side summary that follows "
+        "`assets/comparison-input-schema.json`. Each metric carries status, numeric value "
+        "when observed, unit, exact definition, and evidence references.\n\n"
+        + "## Execution\n\n"
+        + "```bash\n"
+        + "python3 <skill-root>/scripts/perfetto_compare.py \\\n"
+        + "  --side baseline=/absolute/baseline.json \\\n"
+        + "  --side candidate=/absolute/candidate.json \\\n"
+        + "  --baseline baseline --output /absolute/comparison.json\n"
+        + "```\n\n"
+        + "The adapter rejects duplicate sides and incompatible definitions, records missing "
+        "metrics as limitations, and computes absolute/percent deltas only for comparable facts.\n"
+    )
+
+
+def strip_frontmatter(content: str) -> tuple[str, int]:
+    lines = content.splitlines()
+    starts = [index for index, line in enumerate(lines[:10]) if line.strip() == "---"]
+    for start in starts:
+        for end in range(start + 1, len(lines)):
+            if lines[end].strip() != "---":
+                continue
+            candidate = "\n".join(lines[start + 1 : end])
+            try:
+                parsed = yaml.safe_load(candidate)
+            except yaml.YAMLError:
+                continue
+            if isinstance(parsed, dict):
+                return "\n".join(lines[end + 1 :]).lstrip() + "\n", end + 1
+    return content, 0
+
+
+def strategy_frontmatter(content: str) -> tuple[dict[str, Any] | None, str]:
+    body, removed_lines = strip_frontmatter(content)
+    if not removed_lines:
+        return None, body
+    lines = content.splitlines()
+    start = next(index for index, line in enumerate(lines[:10]) if line.strip() == "---")
+    end = removed_lines - 1
+    parsed = yaml.safe_load("\n".join(lines[start + 1 : end]))
+    return (parsed if isinstance(parsed, dict) else None), body
+
+
+_PRODUCT_RUNTIME_TOKENS = (
+    "execute_sql_on", "submit_plan", "invoke_skill", "fetch_artifact",
+    "create_artifact", "get_artifact", "load_artifact", "navigate_timeline",
+    "pin_tracks", "list_skills", "analysis_result_snapshot",
+    "get_comparison_context", "compare_skill", "perfetto_query_by_trace_side",
+    "referenceTraceId", "tracePairContext", "AnalysisResultSnapshot",
+    "snapshot_ids", "baseline_snapshot_id", "perfetto_skill_run",
+    "read_evidence_bundle", "write_evidence_bundle", "portable_checklist",
+    "update_plan_phase", "lookup_strategy_detail",
+    "lookup_knowledge", "submit_hypothesis", "resolve_hypothesis",
+    "flag_uncertainty", "write_analysis_note",
+    "lookup_sql_schema", "process_identity_resolver",
+    "entry_skill",
+)
+
+
+class ToolEquivalent(NamedTuple):
+    skills: tuple[str, ...]  # exported Skills that answer the tool's question
+    note: str
+
+
+# Product tools that strategies may still name because a portable Skill
+# workflow answers the same question. The rendered strategy keeps the routing
+# text and explains the portable equivalent instead of dropping the paragraph.
+PORTABLE_TOOL_EQUIVALENTS = {
+    "analyze_wait_chain": ToolEquivalent(
+        ("process_thread_wait_sources_in_range", "blocking_chain_analysis"),
+        "`analyze_wait_chain(...)` steps mean: run the `process_thread_wait_sources_in_range` "
+        "Skill for the same process and window, whose `wait_class` column uses the same labels "
+        "as `wake_source_class`, and `blocking_chain_analysis` for the waker chain. The portable "
+        "Skills aggregate waits by thread role; they do not return one thread's critical-path segments.",
+    ),
+    "detect_architecture": ToolEquivalent(
+        ("rendering_pipeline_detection",),
+        "`detect_architecture` steps mean: run the `rendering_pipeline_detection` Skill; the "
+        "product tool only executes that Skill and maps its pipeline result to an architecture type.",
+    ),
+}
+
+# `invoke_skill` stays a product token; a unit is kept only when every call in
+# it passes `skill_call_rejections`, and this note maps those calls.
+SKILL_CALL_NOTE = (
+    "`invoke_skill(\"<name>\", {...})` steps mean: run "
+    "`python3 <skill-root>/scripts/perfetto_skill.py run TRACE --skill <name> --output-dir DIR` "
+    "and pass each object field as `--param NAME=JSON`. Every Skill named this way is an "
+    "exported, executable portable Skill, and every field is one of its declared inputs."
+)
+
+# `invoke_skill("name", {...})`, `invoke_skill('name')`, or `invoke_skill(name)`.
+# A bare identifier must close the call: `invoke_skill(skill_id, params)` names
+# a variable, not a Skill, and stays a product-runtime token.
+SKILL_CALL = re.compile(
+    r"""\binvoke_skill\(\s*(?:(?P<quote>["'])|(?=\w+\s*\)))(?P<name>\w+)(?(quote)(?P=quote))"""
+    r"""(?:\s*,\s*(?P<args>\{[^{}]*\}))?"""
+)
+
+
+def portable_tool_notes(body: str) -> str:
+    notes = [
+        equivalent.note
+        for tool, equivalent in sorted(PORTABLE_TOOL_EQUIVALENTS.items())
+        if re.search(rf"\b{re.escape(tool)}\b", body)
+    ]
+    if SKILL_CALL.search(body):
+        notes.append(SKILL_CALL_NOTE)
+    return "".join(note + "\n\n" for note in notes)
+
+
+class PortableSkill(NamedTuple):
+    status: str  # `executable`, `knowledge_only`, or `product-only`
+    inputs: frozenset[str]  # the parameters `perfetto_skill.py run` binds
+
+
+def portable_skill_runtime(
+    catalog: dict[str, Any], raw_skills: Mapping[str, dict[str, Any]]
+) -> dict[str, PortableSkill]:
+    """What `perfetto_skill.py run` accepts for every classified Skill, keyed by name."""
+    skills = {
+        str(entry["name"]): PortableSkill(
+            "product-only"
+            if entry["disposition"] == "product-only"
+            else runtime_status(raw_skills[str(entry["name"])]),
+            declared_input_names(raw_skills[str(entry["name"])]),
+        )
+        for entry in catalog["skills"]
+    }
+    for tool, equivalent in PORTABLE_TOOL_EQUIVALENTS.items():
+        unrunnable = [
+            name for name in equivalent.skills
+            if skills.get(name, PortableSkill("missing", frozenset())).status != "executable"
+        ]
+        if unrunnable:
+            raise ExportError(f"{tool} equivalent names no executable Skill: {unrunnable}")
+    return skills
+
+
+def object_keys(literal: str) -> set[str]:
+    """Top-level keys of a flat `{ key: value, shorthand }` argument literal."""
+    unquoted = re.sub(r'"[^"]*"|\'[^\']*\'', '""', literal)
+    return set(re.findall(r"[{,]\s*(\w+)\s*(?=[:,}])", unquoted))
+
+
+def skill_call_rejections(unit: str, skills: Mapping[str, PortableSkill]) -> list[str]:
+    """Skill calls in a unit that `perfetto_skill.py run` cannot reproduce."""
+    rejected: list[str] = []
+    for call in SKILL_CALL.finditer(unit):
+        name = call["name"]
+        if name not in skills:
+            raise ExportError(f"Strategy names an unclassified Skill: {name}")
+        skill = skills[name]
+        undeclared = sorted(object_keys(call["args"] or "") - skill.inputs)
+        if skill.status != "executable":
+            rejected.append(f"{name} ({skill.status})")
+        elif undeclared:
+            rejected.append(f"{name} (undeclared {', '.join(undeclared)})")
+    return rejected
+
+
+def needs_product_runtime(unit: str, skills: Mapping[str, PortableSkill]) -> tuple[bool, list[str]]:
+    """Whether a unit must be dropped, and the Skill calls that alone caused it."""
+    if not contains_product_runtime(unit):
+        return False, []
+    # Set aside only each call's head; its arguments still count.
+    rest = SKILL_CALL.sub(lambda call: call["args"] or "", unit)
+    if rest == unit or contains_product_runtime(rest):
+        return True, []
+    rejected = skill_call_rejections(unit, skills)
+    return bool(rejected), rejected
+
+
+def contains_product_runtime(value: str) -> bool:
+    return any(token.lower() in value.lower() for token in _PRODUCT_RUNTIME_TOKENS)
+
+
+def sanitize_strategy_metadata(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: sanitized
+            for key, nested in value.items()
+            if not contains_product_runtime(str(key))
+            and (sanitized := sanitize_strategy_metadata(nested)) is not None
+        }
+    if isinstance(value, list):
+        return [
+            sanitized
+            for nested in value
+            if (sanitized := sanitize_strategy_metadata(nested)) is not None
+        ]
+    if isinstance(value, str) and contains_product_runtime(value):
+        return None
+    return value
+
+
+def strip_product_runtime_content(
+    body: str, skills: Mapping[str, PortableSkill]
+) -> tuple[str, int, list[str]]:
+    """Drop fenced blocks and paragraphs that need the product runtime.
+
+    Returns the portable text, the removed line count, and the Skill calls that
+    removed an otherwise portable unit.
+    """
+    removed = 0
+    rejected_calls: set[str] = set()
+
+    def keep(unit: str) -> bool:
+        nonlocal removed
+        drop, rejected = needs_product_runtime(unit, skills)
+        rejected_calls.update(rejected)
+        removed += len(unit.splitlines()) if drop else 0
+        return not drop
+
+    kept: list[str] = []
+    lines = body.splitlines()
+    index = 0
+    while index < len(lines):
+        if lines[index].lstrip().startswith("```"):
+            block = [lines[index]]
+            index += 1
+            while index < len(lines):
+                block.append(lines[index])
+                if lines[index].lstrip().startswith("```"):
+                    index += 1
+                    break
+                index += 1
+            if keep("\n".join(block)):
+                kept.extend(block)
+            continue
+        kept.append(lines[index])
+        index += 1
+    portable = [paragraph for paragraph in "\n".join(kept).split("\n\n") if keep(paragraph)]
+    return "\n\n".join(portable), removed, sorted(rejected_calls)
+
+
+def portable_strategy_content(
+    content: str,
+    skills: Mapping[str, PortableSkill],
+) -> tuple[str, list[dict[str, Any]], dict[str, Any] | None]:
+    metadata, body = strategy_frontmatter(content)
+    transformations: list[dict[str, Any]] = []
+    body, removed_lines, rejected_calls = strip_product_runtime_content(body, skills)
+    body, host_count = re.subn(
+        r"\bSmartPerfetto(?:\s+UI)?\b", "the portable runtime", body, flags=re.I
+    )
+    if removed_lines or host_count:
+        change: dict[str, Any] = {
+            "reason": "product runtime actions removed; concrete CLI contract added",
+            "removed_lines": removed_lines,
+            "replacements": host_count,
+        }
+        if rejected_calls:
+            change["rejected_skill_calls"] = rejected_calls
+        transformations.append(change)
+    return body.strip() + "\n", transformations, sanitize_strategy_metadata(metadata)
+
+
+def investigation_mapping(value: Any, fields: set[str], label: str) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) - fields:
+        raise ExportError(f"Invalid investigation {label}: unknown fields or non-mapping")
+    return value
+
+
+def investigation_text(value: Any, label: str, *, identifier: bool = False) -> str:
+    if not isinstance(value, str) or not value.strip() or contains_product_runtime(value):
+        raise ExportError(f"Invalid investigation {label}: expected portable text")
+    if identifier and not re.fullmatch(r"[a-z][a-z0-9_]*", value):
+        raise ExportError(f"Invalid investigation {label}: expected identifier")
+    return value.strip()
+
+
+def investigation_version(value: Any) -> int:
+    if type(value) not in (int, float) or not 1 <= value <= 2 ** 53 - 1 or value != int(value):
+        raise ExportError("Invalid investigation version")
+    return int(value)
+
+
+INVESTIGATION_EVIDENCE_OPERATORS = frozenset({"gt", "gte", "lt", "lte"})
+
+
+def parse_investigation_condition(value: Any) -> dict[str, Any]:
+    kind = value.get("kind") if isinstance(value, dict) else None
+    if kind == "semantic":
+        condition = investigation_mapping(value, {"kind", "description"}, "condition")
+        return {"kind": "semantic", "description": investigation_text(condition.get("description"), "condition")}
+    if kind == "evidence":
+        # SmartPerfetto resolves this from its evidence ledger. Retain the binding
+        # for semantic conflict detection, never for public display.
+        condition = investigation_mapping(value, {"kind", "description", "metric_id", "operator", "value"}, "condition")
+        operator = condition.get("operator")
+        threshold = condition.get("value")
+        if (not isinstance(operator, str) or operator not in INVESTIGATION_EVIDENCE_OPERATORS
+                or type(threshold) not in (int, float) or not math.isfinite(threshold)):
+            raise ExportError("Invalid investigation evidence condition")
+        return {"kind": "evidence", "description": investigation_text(condition.get("description"), "condition"),
+                "metric_id": investigation_text(condition.get("metric_id"), "condition metric"),
+                "operator": operator, "value": threshold}
+    raise ExportError("Invalid investigation condition kind")
+
+
+def parse_investigation_requirements(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise ExportError("Invalid investigation requirements: expected list")
+    requirements: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in value:
+        requirement = investigation_mapping(raw, {
+            "id", "domain", "description", "required", "condition", "evidence_metrics",
+        }, "requirement")
+        identity = investigation_text(requirement.get("id"), "requirement ID", identifier=True)
+        if identity in seen:
+            raise ExportError(f"Duplicate investigation requirement: {identity}")
+        seen.add(identity)
+        domain = investigation_text(requirement.get("domain"), "domain")
+        description = investigation_text(requirement.get("description"), "description")
+        if "required" in requirement and type(requirement["required"]) is not bool:
+            raise ExportError("Invalid investigation required flag")
+        normalized = {"id": identity, "domain": domain, "description": description,
+                      "required": requirement.get("required", True)}
+        # Retain bindings for semantic conflict detection, never for public display.
+        if "evidence_metrics" in requirement:
+            metrics = requirement["evidence_metrics"]
+            if not isinstance(metrics, list) or not metrics:
+                raise ExportError("Invalid investigation evidence metrics")
+            normalized["evidence_metrics"] = [investigation_text(metric, "metric") for metric in metrics]
+            if len(set(normalized["evidence_metrics"])) != len(metrics):
+                raise ExportError("Duplicate investigation evidence metric")
+        if "condition" in requirement:
+            normalized["condition"] = parse_investigation_condition(requirement["condition"])
+        requirements.append(normalized)
+    return requirements
+
+
+def render_investigation_requirements(requirements: list[dict[str, Any]]) -> str:
+    rendered: list[str] = []
+    for requirement in requirements:
+        rendered.append(f"### {requirement['id']} ({requirement['domain']})\n\n{requirement['description']}\n")
+        if not requirement["required"]:
+            rendered.append("Optional when applicable.\n")
+        if "condition" in requirement:
+            rendered.append("Apply when: " + requirement["condition"]["description"] + "\n")
+    return "\n".join(rendered)
+
+
+def render_investigation_profiles(value: Any) -> str:
+    document = investigation_mapping(value, {"schema_version", "profiles"}, "profiles document")
+    if type(document.get("schema_version")) not in (int, float) or document["schema_version"] != 1:
+        raise ExportError("Unsupported investigation profiles schema")
+    profiles = document.get("profiles")
+    if not isinstance(profiles, dict):
+        raise ExportError("Invalid investigation profiles")
+    rendered: list[str] = []
+    for identity, raw in profiles.items():
+        investigation_text(identity, "profile ID", identifier=True)
+        profile = investigation_mapping(raw, {"version", "requirements"}, "profile")
+        version = investigation_version(profile.get("version"))
+        requirements = parse_investigation_requirements(profile.get("requirements"))
+        if not requirements:
+            raise ExportError("Empty investigation profile requirements")
+        rendered.append(f"## {identity} (version {version})\n\n" + render_investigation_requirements(requirements))
+    return "\n".join(rendered)
+
+
+def render_investigation_contract(value: Any, source: Path) -> str:
+    contract = investigation_mapping(value, {
+        "schema_version", "profiles", "requirements", "not_applicable_reason",
+    }, "scene contract")
+    if type(contract.get("schema_version")) not in (int, float) or contract["schema_version"] != 1:
+        raise ExportError("Unsupported investigation scene schema")
+    rendered = ["## Investigation methodology\n"]
+    if "not_applicable_reason" in contract:
+        if "profiles" in contract or "requirements" in contract:
+            raise ExportError("Invalid investigation exemption with requirements or profiles")
+        rendered.append(investigation_text(contract["not_applicable_reason"], "applicability") + "\n")
+        return "\n".join(rendered)
+    refs = contract.get("profiles", [])
+    if not isinstance(refs, list):
+        raise ExportError("Invalid investigation profile references")
+    profiles: dict[str, Any] = {}
+    if refs:
+        profile_path = source.parent / "investigation-profiles.yaml"
+        if not profile_path.is_file():
+            raise ExportError("Missing shared investigation profiles")
+        document = load_yaml(profile_path)
+        render_investigation_profiles(document)
+        profiles = document["profiles"]
+    seen: set[str] = set()
+    merged: dict[str, dict[str, Any]] = {}
+
+    def append(requirement: dict[str, Any]) -> bool:
+        identity = requirement["id"]
+        if identity in merged:
+            if merged[identity] != requirement:
+                raise ExportError(f"Conflicting investigation requirement: {identity}")
+            return False
+        merged[identity] = requirement
+        return True
+
+    for raw in refs:
+        reference = investigation_mapping(raw, {"id", "version"}, "profile reference")
+        identity = investigation_text(reference.get("id"), "profile ID", identifier=True)
+        version = investigation_version(reference.get("version"))
+        if identity not in profiles or profiles[identity]["version"] != version:
+            raise ExportError(f"Unresolved investigation profile: {identity} version {version}")
+        if identity in seen:
+            raise ExportError(f"Duplicate investigation profile reference: {identity}")
+        seen.add(identity)
+        for requirement in parse_investigation_requirements(profiles[identity]["requirements"]):
+            append(requirement)
+        rendered.append(f"Apply `{identity}` version {version} from [shared investigation methods](investigation-profiles.yaml.md).\n")
+    local = parse_investigation_requirements(contract.get("requirements", []))
+    rendered.append(render_investigation_requirements([requirement for requirement in local if append(requirement)]))
+    if not merged:
+        raise ExportError("Empty investigation contract")
+    return "\n".join(rendered)
+
+
+def render_strategy_reference(
+    source: Path,
+    entry: dict[str, Any],
+    *,
+    skills: Mapping[str, PortableSkill] = MappingProxyType({}),
+) -> tuple[str, list[dict[str, Any]]]:
+    content = source.read_text(encoding="utf-8")
+    raw_metadata, _ = strategy_frontmatter(content)
+    portable, transformations, metadata = portable_strategy_content(content, skills)
+    if raw_metadata and "investigation_contract" in raw_metadata:
+        # Validate the original contract before generic sanitization can drop fields.
+        portable = render_investigation_contract(raw_metadata["investigation_contract"], source) + "\n" + portable
+        if metadata:
+            metadata.pop("investigation_contract", None)
+        transformations.append({"reason": "investigation contract projected to portable methodology", "removed_lines": 0})
+    title = source.name.removesuffix(".md").replace(".", " ").replace("-", " ").title()
+    if source.name == "investigation-profiles.yaml":
+        portable = render_investigation_profiles(load_yaml(source))
+        transformations = [{"reason": "investigation profiles projected without native evidence bindings", "removed_lines": 0}]
+    elif source.suffix in {".yaml", ".yml"}:
+        portable = f"```yaml\n{portable.rstrip()}\n```\n"
+    metadata_block = yaml_block(metadata) if metadata else ""
+    rendered = (
+        generated_header(entry)
+        + f"\n# {title}\n\n"
+        + "Portable methodology extracted from the SmartPerfetto strategy library.\n\n"
+        + "`execute_sql(...)` examples mean to run the contained SQL through "
+        "`perfetto_query.py`; they do not require a product tool.\n\n"
+        + portable_tool_notes(metadata_block + portable)
+        + "## Portable execution commands\n\n"
+        + "- List Skills: `python3 <skill-root>/scripts/perfetto_skill.py list`.\n"
+        + "- Run a Skill: `python3 <skill-root>/scripts/perfetto_skill.py run TRACE --skill SKILL --output-dir DIR`.\n"
+        + "- Run one query: `python3 <skill-root>/scripts/perfetto_query.py TRACE --query-id SKILL/STEP --output RESULT.json`.\n"
+        + "- Compare side summaries: `python3 <skill-root>/scripts/perfetto_compare.py --side NAME=SUMMARY.json --baseline NAME`.\n"
+        + "- Read and write evidence as ordinary local JSON files; no artifact, session, snapshot, or host-tool API exists.\n\n"
+        + (
+            "## Portable strategy metadata\n\n"
+            + metadata_block
+            + "\n\n"
+            if metadata
+            else ""
+        )
+        + portable
+    )
+    return rendered, transformations
+
+
+def render_pipeline_doc(source: Path, entry: dict[str, Any]) -> str:
+    content, _ = strip_frontmatter(source.read_text(encoding="utf-8"))
+    return generated_header(entry) + "\n" + content.lstrip()
+
+
+def directory_manifest(root: Path) -> dict[str, str]:
+    if not root.is_dir():
+        return {}
+    return {
+        path.relative_to(root).as_posix(): sha256_file(path)
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+def generate_references(
+    source: Path,
+    catalog: dict[str, Any],
+    *,
+    check: bool,
+    skill_root: Path = SKILL_ROOT,
+) -> None:
+    references_root = skill_root / "references"
+    generated = references_root / "generated"
+    references_root.mkdir(parents=True, exist_ok=True)
+    transformations: list[dict[str, Any]] = []
+    sql_destinations: set[str] = set()
+    with tempfile.TemporaryDirectory(prefix=".generated-", dir=references_root) as temp:
+        temporary_generated = Path(temp)
+        commit = str(catalog["source"]["commit"])
+        raw_skills = {
+            str(entry["name"]): load_yaml(source / entry["source_path"])
+            for entry in catalog["skills"]
+        }
+        skills = portable_skill_runtime(catalog, raw_skills)
+        for entry in catalog["skills"]:
+            if entry["disposition"] not in {"exported", "merged"}:
+                continue
+            if entry["name"] == "multi_trace_result_comparison":
+                content = render_comparison_reference(entry)
+                transformations.append(
+                    {
+                        "source_path": entry["source_path"],
+                        "reason": "product snapshot comparison replaced by file-based JSON adapter",
+                        "removed_lines": 0,
+                    }
+                )
+            else:
+                content = render_skill_reference(
+                    raw_skills[str(entry["name"])],
+                    entry,
+                    temporary_generated,
+                    sql_destinations,
+                )
+            write_generated_text(
+                temporary_generated / destination_in_generated_root(entry["destination"]),
+                content,
+            )
+        for entry in catalog["strategies"]:
+            if entry["disposition"] not in {"exported", "merged"}:
+                continue
+            content, changes = render_strategy_reference(
+                source / entry["source_path"], entry, skills=skills
+            )
+            write_generated_text(
+                temporary_generated / destination_in_generated_root(entry["destination"]),
+                content,
+            )
+            for change in changes:
+                transformations.append({"source_path": entry["source_path"], **change})
+        for entry in catalog["pipeline_docs"]:
+            content = render_pipeline_doc(source / entry["source_path"], entry)
+            write_generated_text(
+                temporary_generated / destination_in_generated_root(entry["destination"]),
+                content,
+            )
+        runtime_summary = build_runtime_assets(
+            source, catalog, temporary_generated, skill_root=skill_root
+        )
+        generated_catalog = {
+            "schema_version": 2,
+            "source_commit": commit,
+            "generated_files": len(directory_manifest(temporary_generated)) + 1,
+            "sql_files": len(sql_destinations),
+            **runtime_summary,
+            "transformations": sorted(
+                transformations,
+                key=lambda item: (item["source_path"], item["reason"]),
+            ),
+        }
+        write_text_atomic(
+            temporary_generated / "catalog.json",
+            json.dumps(generated_catalog, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        )
+        expected = directory_manifest(temporary_generated)
+        if check:
+            current = directory_manifest(generated)
+            if current != expected:
+                missing = sorted(set(expected) - set(current))
+                extra = sorted(set(current) - set(expected))
+                changed = sorted(
+                    path for path in set(current) & set(expected) if current[path] != expected[path]
+                )
+                raise ExportError(
+                    "Generated reference drift detected: "
+                    f"missing={missing[:5]}, extra={extra[:5]}, changed={changed[:5]}"
+                )
+            return
+        if generated.exists():
+            shutil.rmtree(generated)
+        os.replace(temporary_generated, generated)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Export a deterministic public Agent Skill catalog from SmartPerfetto."
+    )
+    parser.add_argument("--source", required=True, type=Path)
+    parser.add_argument("--policy", type=Path)
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--skill-root", type=Path, default=SKILL_ROOT)
+    parser.add_argument("--migration-output", type=Path, default=MIGRATION_COVERAGE)
+    parser.add_argument("--bootstrap-policy", type=Path)
+    parser.add_argument("--check", action="store_true")
+    parser.add_argument("--allow-dirty", action="store_true")
+    args = parser.parse_args(argv)
+
+    source = args.source.expanduser().resolve()
+    if not (source / ".git").exists():
+        raise ExportError(f"SmartPerfetto source is not a Git checkout: {source}")
+    state = source_state(source)
+
+    if args.bootstrap_policy:
+        if state["dirty"]:
+            raise ExportError("Refusing to bootstrap policy from a dirty SmartPerfetto checkout")
+        policy = bootstrap_policy(source)
+        destination = args.bootstrap_policy.expanduser().resolve()
+        write_bootstrap_policy(destination, policy)
+        print(
+            f"Bootstrapped {len(policy['skills'])} Skills, "
+            f"{len(policy['strategies'])} strategy sources, and "
+            f"{len(policy['pipeline_docs'])} pipeline docs to {destination}"
+        )
+        return 0
+
+    if state["dirty"] and not args.allow_dirty:
+        raise ExportError("SmartPerfetto checkout is dirty; commit source changes before export")
+    policy_path = (
+        args.policy.expanduser().resolve()
+        if args.policy
+        else source / "backend" / "skills" / "public-export.yaml"
+    )
+    catalog = build_catalog(source, policy_path)
+    serialized = serialize_catalog(catalog)
+    output = args.output.expanduser().resolve()
+    skill_root = args.skill_root.expanduser().resolve()
+    migration_output = args.migration_output.expanduser().resolve()
+    if args.check:
+        if not output.is_file():
+            raise ExportError(f"Catalog is missing: {output}")
+        current = output.read_text(encoding="utf-8")
+        if current != serialized:
+            raise ExportError(
+                f"Catalog drift detected: run {Path(__file__).name} --source {source}"
+            )
+        expected_migration = render_migration_coverage(catalog)
+        if not migration_output.is_file():
+            raise ExportError(f"Migration coverage is missing: {migration_output}")
+        if migration_output.read_text(encoding="utf-8") != expected_migration:
+            raise ExportError(
+                f"Migration coverage drift detected: run {Path(__file__).name} --source {source}"
+            )
+        generate_references(source, catalog, check=True, skill_root=skill_root)
+        print(f"Catalog is current: {output}")
+        return 0
+    write_text_atomic(output, serialized)
+    write_text_atomic(migration_output, render_migration_coverage(catalog))
+    generate_references(source, catalog, check=False, skill_root=skill_root)
+    print(
+        f"Exported {catalog['summary']['runtime_candidates']} runtime Skills, "
+        f"{catalog['summary']['strategy_sources']} strategy sources, and "
+        f"{catalog['summary']['pipeline_docs']} pipeline docs to {output}"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except ExportError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(2)

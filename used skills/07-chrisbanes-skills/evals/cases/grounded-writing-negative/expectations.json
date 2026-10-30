@@ -1,0 +1,4 @@
+{
+  "files": ["draft.md"],
+  "must_contain": ["minimum-pixel interpolation", "CPU mask", "cooldown", "p95", "device matrix"]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "grounded-writing-negative",
+  "title": "Leave an internal technical report intact",
+  "family": "writing",
+  "target_skills": ["grounded-writing"],
+  "expected_skills": ["grounded-writing"],
+  "task_mode": "edit",
+  "kind": "negative",
+  "fixture": "text",
+  "allowed_write_paths": [],
+  "validators": [{"argv": ["python3", "@validators/text_case.py", "grounded-writing-negative"], "timeout_seconds": 30}],
+  "rubric": [
+    {"id": "restraint", "text": "The response recognizes that an internal technical report appropriately retains its implementation and diagnostic detail"},
+    {"id": "no-invention", "text": "The response does not add a fabricated user outcome, visual result, or stronger performance claim"}
+  ],
+  "provenance": {"kind": "synthetic"}
+}

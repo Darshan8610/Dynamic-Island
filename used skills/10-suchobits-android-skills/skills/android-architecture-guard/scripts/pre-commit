@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# Architecture Guard — Pre-commit Hook
+#
+# Fast structural checks that run in < 2 seconds.
+# Catches the most common mistakes before they enter git history.
+#
+# Install:
+#   cp skills/android-architecture-guard/scripts/pre-commit .git/hooks/pre-commit
+#   chmod +x .git/hooks/pre-commit
+#
+# Or with lefthook/husky:
+#   run: bash skills/android-architecture-guard/scripts/pre-commit
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m'
+
+VIOLATIONS=0
+WARNINGS=0
+
+fail() {
+    echo -e "${RED}✗ $1${NC}" >&2
+    VIOLATIONS=$((VIOLATIONS + 1))
+}
+
+warn() {
+    echo -e "${YELLOW}⚠ $1${NC}" >&2
+    WARNINGS=$((WARNINGS + 1))
+}
+
+pass() {
+    echo -e "${GREEN}✓ $1${NC}"
+}
+
+echo "Architecture Guard: running pre-commit checks..."
+echo
+
+# --- Check 1: Staged build.gradle.kts files with impl dependencies outside app/ ---
+
+STAGED_GRADLE=$(git diff --cached --name-only --diff-filter=ACM | grep 'build\.gradle\.kts$' || true)
+
+if [ -n "$STAGED_GRADLE" ]; then
+    while IFS= read -r file; do
+        # Skip app module — it's allowed to depend on impl
+        if [[ "$file" == app/* ]]; then
+            continue
+        fi
+
+        # Check for feature impl dependencies
+        if grep -qE 'implementation\(projects\.feature\.[a-zA-Z]+\.impl\)' "$file" 2>/dev/null; then
+            fail "$file: depends on a feature impl module. Only app/ may depend on feature impl modules."
+        fi
+    done <<< "$STAGED_GRADLE"
+fi
+
+# --- Check 2: New modules registered in settings.gradle.kts must match directory structure ---
+
+if git diff --cached --name-only | grep -q 'settings\.gradle\.kts'; then
+    # Extract newly added include() lines
+    NEW_INCLUDES=$(git diff --cached settings.gradle.kts | grep '^+.*include(' | grep -v '^+++' | sed 's/.*include("//' | sed 's/").*//' || true)
+
+    while IFS= read -r module_path; do
+        [ -z "$module_path" ] && continue
+
+        # Convert :feature:home:impl to feature/home/impl
+        dir_path=$(echo "$module_path" | tr ':' '/')
+
+        # Feature modules must be under feature/
+        if echo "$module_path" | grep -qE ':feature:'; then
+            if [ ! -d "$dir_path" ]; then
+                fail "Module $module_path registered in settings.gradle.kts but directory $dir_path does not exist."
+            fi
+
+            # Check api/impl pairing
+            if echo "$module_path" | grep -qE ':impl$'; then
+                api_path=$(echo "$module_path" | sed 's/:impl$/:api/')
+                api_dir=$(echo "$dir_path" | sed 's/impl$/api/')
+                if ! grep -q "\"$api_path\"" settings.gradle.kts 2>/dev/null && [ ! -d "$api_dir" ]; then
+                    warn "Module $module_path has no corresponding api module ($api_path). Every feature needs both api and impl."
+                fi
+            fi
+
+            if echo "$module_path" | grep -qE ':api$'; then
+                impl_path=$(echo "$module_path" | sed 's/:api$/:impl/')
+                impl_dir=$(echo "$dir_path" | sed 's/api$/impl/')
+                if ! grep -q "\"$impl_path\"" settings.gradle.kts 2>/dev/null && [ ! -d "$impl_dir" ]; then
+                    warn "Module $module_path has no corresponding impl module ($impl_path). Every feature needs both api and impl."
+                fi
+            fi
+        fi
+
+        # Detect feature-like modules outside feature/
+        if echo "$module_path" | grep -qiE '(screen|page|tab|flow)' && ! echo "$module_path" | grep -qE ':feature:'; then
+            warn "Module $module_path looks like a feature but is not under :feature:. Is this intentional?"
+        fi
+    done <<< "$NEW_INCLUDES"
+fi
+
+# --- Check 3: No new modules created outside standard directories ---
+
+STAGED_NEW_DIRS=$(git diff --cached --name-only --diff-filter=A | grep 'build\.gradle\.kts$' | head -20 || true)
+
+if [ -n "$STAGED_NEW_DIRS" ]; then
+    while IFS= read -r gradle_file; do
+        dir=$(dirname "$gradle_file")
+
+        # Check if it applies a feature plugin but isn't under feature/
+        if grep -qE 'android\.feature\.(impl|api)' "$gradle_file" 2>/dev/null; then
+            if [[ "$dir" != feature/* ]]; then
+                fail "$gradle_file: applies a feature plugin but is not under feature/. Move to feature/<name>/impl or feature/<name>/api."
+            fi
+        fi
+    done <<< "$STAGED_NEW_DIRS"
+fi
+
+# --- Check 4: core:model should not gain new project dependencies ---
+
+if [ -n "$STAGED_GRADLE" ]; then
+    MODEL_GRADLE=$(echo "$STAGED_GRADLE" | grep 'core/model/build\.gradle\.kts' || true)
+    if [ -n "$MODEL_GRADLE" ]; then
+        NEW_PROJECT_DEPS=$(git diff --cached "$MODEL_GRADLE" | grep '^+.*projects\.' | grep -v '^+++' || true)
+        if [ -n "$NEW_PROJECT_DEPS" ]; then
+            fail "core/model/build.gradle.kts: new project dependency added. core:model must remain a leaf node with zero project dependencies."
+        fi
+    fi
+fi
+
+# --- Check 5: Detect architecture guard suppressions being added ---
+
+if [ -n "$STAGED_GRADLE" ]; then
+    while IFS= read -r file; do
+        if git diff --cached "$file" | grep -q 'architectureGuard\.suppress'; then
+            warn "$file: architecture guard suppression added. Ensure this is tracked in a ticket and reviewed."
+        fi
+    done <<< "$STAGED_GRADLE"
+fi
+
+# --- Results ---
+
+echo
+if [ $VIOLATIONS -gt 0 ]; then
+    echo -e "${RED}Architecture Guard: $VIOLATIONS violation(s) found. Commit blocked.${NC}"
+    echo -e "Fix the violations above, or use ${YELLOW}git commit --no-verify${NC} to bypass (not recommended)."
+    exit 1
+elif [ $WARNINGS -gt 0 ]; then
+    echo -e "${YELLOW}Architecture Guard: $WARNINGS warning(s). Review before pushing.${NC}"
+    exit 0
+else
+    pass "Architecture Guard: all checks passed."
+    exit 0
+fi

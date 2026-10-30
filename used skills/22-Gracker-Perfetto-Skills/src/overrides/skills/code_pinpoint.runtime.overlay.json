@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "target": "runtime/skills/code_pinpoint.json",
+  "kind": "skill",
+  "expected_base_sha256": "8062a483e4872424a33d3dc0ce172605e8694812413a019eed8f37f3f24f332a",
+  "replacement": "code_pinpoint.runtime.json",
+  "replacement_sha256": "6739ca96b398b45b3272847244e540d18c2b1670249241d10510f2001efcde61",
+  "reason": "Keep the public projection portable: English anchor wording and no SmartPerfetto ${package} signal patterns. The deterministic native-symbol query itself was upstreamed and is now taken from the base.",
+  "regression_ids": [
+    "startup-heavy-code-pinpoint-anchor-kind",
+    "callstack-code-pinpoint-function"
+  ],
+  "dependent_replacements": [
+    {
+      "target": "runtime/android/code_pinpoint.json",
+      "expected_base_sha256": "1d1ffc3b093ed1d9a494509aea83fbdde45c5364315211da73c94d32bf6ebb7c",
+      "replacement": "code_pinpoint.android.json",
+      "replacement_sha256": "19f195be05b69d1d92d955623984a77496c01588435ec409863555f42f9efeb0"
+    },
+    {
+      "target": "runtime/queries/code_pinpoint.json",
+      "expected_base_sha256": "4541d96b3897ebecfa0d1fad6ff6038f220f38d3315352e92e27ad265090d5d7",
+      "replacement": "code_pinpoint.queries.json",
+      "replacement_sha256": "6173596eb151961de1edca9ec4ae0df2a7603f4493987c6b3faf202aa5fe627f"
+    },
+    {
+      "target": "skills/code_pinpoint.md",
+      "expected_base_sha256": "36f32e25b591931f061e50ea5ae2dead9917daa93fbb619dc3f0bfe1cc092d87",
+      "replacement": "code_pinpoint.md",
+      "replacement_sha256": "eddd4180c3a2f0c057c40149c68c281450ebca7408130f147b810b0687215d60"
+    }
+  ],
+  "upstream_candidate": "propose"
+}

@@ -1,0 +1,27 @@
+Awesome Kotlin Android Agent Skills — Licensing
+
+This repository is dual-licensed. When you reuse material from it, pick the
+license that matches what you are reusing.
+
+1. Source code and code snippets
+   Licensed under the MIT License.
+   See LICENSE-CODE for the full text.
+   This covers every code block in the Markdown files, example snippets,
+   configuration files, and any future scripts or source files.
+
+2. Documentation and prose
+   Licensed under the Creative Commons Attribution 4.0 International License
+   (CC BY 4.0). See LICENSE-DOCS for the full text.
+   This covers SKILL.md files, README.md, Agent.md, and any other written
+   documentation in the repository.
+
+Attribution
+-----------
+Attribution is appreciated for code (MIT) and required for documentation
+(CC BY 4.0). A reasonable attribution looks like:
+
+    Portions adapted from "Awesome Kotlin Android Agent Skills"
+    (https://github.com/<your-handle>/awesome-kotlin-android-agent-skills),
+    licensed under MIT and CC BY 4.0.
+
+Questions about licensing can be opened as an issue on the repository.

@@ -1,0 +1,62 @@
+{
+  "id": "run-github-project-delivery-direct",
+  "title": "Deliver a claimed Project ticket under one startup merge decision",
+  "family": "workflow",
+  "target_skills": [
+    "run-github-project",
+    "deliver-spec"
+  ],
+  "expected_skills": [
+    "run-github-project",
+    "deliver-spec"
+  ],
+  "task_mode": "review",
+  "kind": "direct",
+  "fixture": "workflow",
+  "forbid_all_commands": true,
+  "allowed_write_paths": [],
+  "validators": [
+    {
+      "argv": [
+        "python3",
+        "@validators/text_case.py",
+        "run-github-project-delivery-direct"
+      ],
+      "timeout_seconds": 30
+    }
+  ],
+  "rubric": [
+    {
+      "id": "startup-merge-decision",
+      "text": "Describes one nonblocking startup question because no preference was supplied; the deadline is 60 seconds from presentation, merging stays disabled pending a reply, and authorized delivery continues. The t=30 affirmative grants eligible merges for this invocation only. On the no-reply t=60 branch, records no merge permission, pauses only merges and continues the unrelated runnable work without asking again per PR or refresh. Does not actually ask the user during this read-only assessment. In the fast next variant, waits only for a reply or the remaining 40 seconds before normal handback, prioritizes runnable work and never starts a watcher or resets the deadline."
+    },
+    {
+      "id": "capacity",
+      "text": "Continues missing final review coverage on the already implemented candidate without demanding an idle implementation worker or repeating implementation. If review finds a code repair, waits for spare descendant capacity and resumes its original implementation owner; counts reviewers and workers against the same caller-supplied capacity."
+    },
+    {
+      "id": "automatic-handoff",
+      "text": "Keeps the ticket in deliver-spec Project-handoff mode under the existing run grant; reuses the current independently reviewed plan without another plan or test-seam approval gate."
+    },
+    {
+      "id": "provider-ownership",
+      "text": "Uses deliver-spec's bundled delegated implementation procedure without requiring the separate implement-with-subagents installation or an explicit orchestration request. Persistent ticket agent owns integration, acceptance and non-merge PR delivery, original implementation workers own code repairs, and descendants never mutate Project, issue, PR or merge state."
+    },
+    {
+      "id": "review-coverage",
+      "text": "Has one fresh independent read-only reviewer report each Project review contract separately at the exact clean candidate head; reuses correctness/standards coverage at d1ce and obtains only missing reuse/clarity/efficiency and over-engineering coverage without a second reviewer or external tracker setup. After repairs, renews affected checks and review of the changed range and interactions; broadens when evidence is invalid or scope cannot be bounded."
+    },
+    {
+      "id": "pr-and-authority",
+      "text": "Creates exactly one draft PR for the nonempty final diff only after combined review evidence covers the final head, confirms the PR head is the exact reviewed SHA, uses a non-closing issue link for close-after-merge, and leaves squash merge and associated issue closure to the Project controller under this invocation startup merge grant after all final-head gates pass."
+    },
+    {
+      "id": "review-restraint",
+      "text": "Does not execute providers, agents, commands, or mutations during this supplied-state assessment."
+    }
+  ],
+  "provenance": {
+    "kind": "synthetic"
+  },
+  "calibration": true
+}

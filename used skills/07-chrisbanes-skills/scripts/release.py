@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+import argparse
+import datetime as dt
+import json
+import pathlib
+import re
+import sys
+
+
+VERSION_PATTERN = re.compile(
+    r"^[0-9]{4}\.([1-9]|1[0-2])\.([1-9]|[12][0-9]|3[01])(?:\.(0?[1-9]|[1-9][0-9]))?$"
+)
+EXISTING_VERSION_PATTERN = re.compile(
+    r"^[0-9]{4}\.(0?[1-9]|1[0-2])\.(0?[1-9]|[12][0-9]|3[01])(?:\.(0?[1-9]|[1-9][0-9]))?$"
+)
+PLUGIN_NAME = "chrisbanes-skills"
+OPENCODE_MAIN = ".opencode/plugins/chrisbanes-skills.js"
+AGENT_PLUGINS_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
+AGENT_PLUGINS_FIELDS = {
+    "$schema",
+    "name",
+    "version",
+    "description",
+    "author",
+    "homepage",
+    "repository",
+    "license",
+    "keywords",
+    "extensions",
+}
+
+
+def validate_version(version):
+    if not VERSION_PATTERN.fullmatch(version):
+        raise ValueError(
+            "Version must use CalVer YYYY.M.D, YYYY.M.D.N, or YYYY.M.D.NN without "
+            f"zero-padded month/day: {version}"
+        )
+    parts = version.split(".")
+    year, month, day = map(int, parts[:3])
+    try:
+        dt.date(year, month, day)
+    except ValueError as error:
+        raise ValueError(f"Version must use a valid Gregorian calendar date: {version}") from error
+    if len(parts) == 4 and len(parts[3]) == 1:
+        return ".".join((*parts[:3], f"0{parts[3]}"))
+    return version
+
+
+def default_version():
+    today = dt.datetime.now(dt.timezone.utc).date()
+    return f"{today.year}.{today.month}.{today.day}"
+
+
+def resolve_version(input_version, existing_versions=()):
+    if input_version:
+        return validate_version(input_version)
+    today = default_version()
+    numbers = []
+    for version in existing_versions:
+        if not EXISTING_VERSION_PATTERN.fullmatch(version):
+            continue
+        parts = version.split(".")
+        parts[1:3] = [str(int(part)) for part in parts[1:3]]
+        version = validate_version(".".join(parts))
+        if version == today:
+            numbers.append(0)
+        elif version.startswith(today + "."):
+            numbers.append(int(version.split(".")[3]))
+    if not numbers:
+        return today
+    next_number = max(numbers) + 1
+    if next_number > 99:
+        raise ValueError("Today's release numbers are exhausted; use an explicit version or wait until tomorrow.")
+    return f"{today}.{next_number:02d}"
+
+
+def update_manifests(root, version):
+    version = validate_version(version)
+    for path in plugin_manifest_paths(root):
+        data = read_json(path)
+        data["version"] = version
+        write_json(path, data)
+
+
+def validate_manifests(root, version):
+    version = validate_version(version)
+
+    portable = read_json(root / "plugin.json")
+    claude = read_json(root / ".claude-plugin" / "plugin.json")
+    codex = read_json(root / ".codex-plugin" / "plugin.json")
+    package = read_json(root / "package.json")
+    claude_marketplace = read_json(root / ".claude-plugin" / "marketplace.json")
+    codex_marketplace = read_json(root / ".agents" / "plugins" / "marketplace.json")
+
+    require(
+        portable.get("$schema") == AGENT_PLUGINS_SCHEMA,
+        "Agent Plugins schema must target version 1.0.0",
+    )
+    require(
+        set(portable) <= AGENT_PLUGINS_FIELDS,
+        "Agent Plugins manifest has unknown fields: "
+        f"{sorted(set(portable) - AGENT_PLUGINS_FIELDS)}",
+    )
+    require(
+        portable.get("name") == PLUGIN_NAME,
+        "Agent Plugins name must be chrisbanes-skills",
+    )
+    require(claude.get("name") == PLUGIN_NAME, "Claude plugin name must be chrisbanes-skills")
+    require(codex.get("name") == PLUGIN_NAME, "Codex plugin name must be chrisbanes-skills")
+    require(package.get("name") == PLUGIN_NAME, "OpenCode package name must be chrisbanes-skills")
+    require(
+        portable.get("version") == version,
+        f"Agent Plugins version mismatch: {portable.get('version')}",
+    )
+    require(claude.get("version") == version, f"Claude plugin version mismatch: {claude.get('version')}")
+    require(codex.get("version") == version, f"Codex plugin version mismatch: {codex.get('version')}")
+    require(package.get("version") == version, f"OpenCode package version mismatch: {package.get('version')}")
+    require(
+        claude_marketplace.get("name") == PLUGIN_NAME,
+        "Claude marketplace name must be chrisbanes-skills",
+    )
+    require(
+        codex_marketplace.get("name") == PLUGIN_NAME,
+        "Codex marketplace name must be chrisbanes-skills",
+    )
+    require(codex.get("skills") == "./skills/", "Codex plugin skills path must be ./skills/")
+    require(package.get("main") == OPENCODE_MAIN, f"OpenCode package main must be {OPENCODE_MAIN}")
+
+
+def plugin_manifest_paths(root):
+    return [
+        root / "plugin.json",
+        root / ".claude-plugin" / "plugin.json",
+        root / ".codex-plugin" / "plugin.json",
+        root / "package.json",
+    ]
+
+
+def read_json(path):
+    with path.open(encoding="utf-8") as file:
+        return json.load(file)
+
+
+def write_json(path, data):
+    with path.open("w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2)
+        file.write("\n")
+
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Release helpers for chrisbanes-skills.")
+    parser.add_argument(
+        "--root",
+        default=".",
+        type=pathlib.Path,
+        help="Repository root. Defaults to the current directory.",
+    )
+
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    resolve_parser = subparsers.add_parser("resolve-version")
+    resolve_parser.add_argument("input_version", nargs="?", default="")
+    resolve_parser.add_argument("--existing-versions", type=pathlib.Path)
+
+    update_parser = subparsers.add_parser("update-manifests")
+    update_parser.add_argument("version")
+
+    validate_parser = subparsers.add_parser("validate-manifests")
+    validate_parser.add_argument("version")
+
+    args = parser.parse_args(argv)
+    root = args.root.resolve()
+
+    try:
+        if args.command == "resolve-version":
+            existing_versions = (
+                args.existing_versions.read_text(encoding="utf-8").splitlines()
+                if args.existing_versions else ()
+            )
+            print(resolve_version(args.input_version, existing_versions))
+        elif args.command == "update-manifests":
+            update_manifests(root, args.version)
+        elif args.command == "validate-manifests":
+            validate_manifests(root, args.version)
+        else:
+            parser.error(f"Unknown command: {args.command}")
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

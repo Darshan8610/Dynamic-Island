@@ -1,0 +1,5 @@
+{
+  "files": ["draft.md"],
+  "must_contain": ["Full", "Adaptive", "experimental"],
+  "must_not_contain": ["minimum-pixel", "CPU mask", "cooldown"]
+}

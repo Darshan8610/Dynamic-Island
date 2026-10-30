@@ -1,0 +1,15 @@
+.DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+.perfetto-cache/
+test-output/
+.worktrees/
+.perfetto-fixtures/
+test-output/fixtures/

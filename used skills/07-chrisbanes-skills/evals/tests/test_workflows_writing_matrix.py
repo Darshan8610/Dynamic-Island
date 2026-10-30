@@ -1,0 +1,1872 @@
+import json
+import re
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+from urllib.parse import urlsplit
+
+from evals.harness.cases import validate_corpus
+from evals.harness.codex import build_subject_command
+from evals.harness.runner import (
+    RunConfig,
+    automatically_invokable_public_skills,
+    prepare_workspace,
+)
+from evals.harness.experiment import (
+    evaluation_conditions,
+    execute_experiment,
+    filter_cases,
+    reconcile_automatic_eligibility,
+)
+from evals.harness.judge import JudgeConfig
+from evals.harness.suites import PUBLIC_SKILLS, WORKFLOWS_WRITING_SKILLS
+from evals.validators.text_case import validate_task_graph
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def plan_artifact(dependency: str = "none") -> str:
+    return (
+        "<!-- to-plan:conversation-plan:v1 id=123e4567-e89b-42d3-a456-426614174000 -->\n"
+        "# Quote missing validator files\n\n"
+        "**Planned against:** `main` at `0123456789abcdef0123456789abcdef01234567`\n\n"
+        "## Implementation context\n\n"
+        "Existing: `validator.py` defines `missing_file_error`.\n\n"
+        "## Implementation slices\n\n"
+        "**Task graph and parallelism:** The graph is acyclic; one slice has no parallel work.\n\n"
+        "### 1. Quote missing-file paths\n\n"
+        "**Task ID:** `T1`\n"
+        f"**Depends on:** `{dependency}`\n\n"
+        "**Files and symbols:** Edit existing `missing_file_error` in `validator.py` and its test in `tests/test_validator.py`.\n\n"
+        "**Test:** Change the assertion for `settings file.json` to expect exactly `missing file: 'settings file.json'`; expect it to fail before the implementation edit.\n\n"
+        "**Implementation:** Quote the supplied path in `missing_file_error` without changing its signature.\n\n"
+        "**Validate:** From repository root, run `python3 -B -m unittest tests.test_validator`; expect it to pass.\n\n"
+        "**Complete when:** The path, including spaces, is preserved inside quotes and the focused test passes.\n\n"
+        "## Acceptance coverage\n\n"
+        "| Quoted diagnostic | 1 | Focused test |\n\n"
+        "## Final validation\n\n"
+        "- From repository root, run `python3 -B -m unittest tests.test_validator`; expect success.\n"
+    )
+
+
+class WorkflowsWritingMatrixTest(unittest.TestCase):
+    def test_delivery_rules_survive_individual_skill_installation(self):
+        behavioral = "references/behavioral-review.md"
+        boundary = "skills/to-plan/references/boundary-validation.md"
+        cases = {
+            "deliver-spec-review-convergence-direct": (
+                ("references/evidence-and-review.md", "behavioral-review.md", behavioral),
+                ("references/implementation-mode.md", "boundary-validation.md", boundary),
+            ),
+            "shepherd-boundary-diagnostics-novel": (
+                ("SKILL.md", "references/behavioral-review.md", behavioral),
+            ),
+            "run-github-project-review-convergence-negative": (
+                ("references/review-contracts.md", "behavioral-review.md", behavioral),
+            ),
+            "implement-with-subagents-direct": (
+                ("SKILL.md", "references/behavioral-review.md", behavioral),
+                ("references/implementation-mode.md", "boundary-validation.md", boundary),
+            ),
+            "to-plan-boundary-validation-direct": (
+                ("references/workflow.md", "boundary-validation.md", boundary),
+            ),
+            "deliver-spec-fixture-calibration-direct": (
+                ("references/evidence-and-review.md", "behavioral-review.md", behavioral),
+            ),
+            "shepherd-rendering-consumers-novel": (
+                ("SKILL.md", "references/behavioral-review.md", behavioral),
+            ),
+            "to-plan-fixture-calibration-novel": (
+                ("SKILL.md", "references/workflow.md", "skills/to-plan/references/workflow.md"),
+            ),
+        }
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+        by_id = {case.id: case for case in report.cases}
+        for case_id, resources in cases.items():
+            case = by_id[case_id]
+            with self.subTest(case=case_id), tempfile.TemporaryDirectory() as directory:
+                workspace = prepare_workspace(
+                    case, REPO_ROOT, Path(directory) / "fixture",
+                    enabled_skills=case.target_skills,
+                )
+                skill = workspace / ".agents/skills" / case.target_skills[0]
+                for caller, reference, canonical in resources:
+                    source = skill / caller
+                    links = re.findall(r"\]\(([^)]+)\)", source.read_text(encoding="utf-8"))
+                    self.assertIn(reference, links)
+                    target = source.parent / reference
+                    self.assertFalse(target.is_symlink())
+                    self.assertEqual((REPO_ROOT / canonical).read_bytes(), target.read_bytes())
+
+    def test_staged_skill_files_are_copied_without_a_skill_entrypoint(self):
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+        case = next(c for c in report.cases if c.id == "run-github-project-unattended-direct")
+        reference = "deliver-spec/references/qualification-failure.md"
+        self.assertEqual((reference,), case.staged_skill_files)
+        for skill_dir in (".agents/skills", ".claude/skills"):
+            with self.subTest(skill_dir=skill_dir), tempfile.TemporaryDirectory() as directory:
+                workspace = prepare_workspace(
+                    case, REPO_ROOT, Path(directory) / "fixture",
+                    enabled_skills=case.target_skills, skill_dir=skill_dir,
+                )
+                staged = workspace / skill_dir / reference
+                self.assertEqual((REPO_ROOT / "skills" / reference).read_bytes(), staged.read_bytes())
+                self.assertFalse((workspace / skill_dir / "deliver-spec" / "SKILL.md").exists())
+        with tempfile.TemporaryDirectory() as directory:
+            baseline = prepare_workspace(
+                case, REPO_ROOT, Path(directory) / "fixture", enabled_skills=(),
+            )
+            self.assertFalse((baseline / ".agents/skills" / reference).exists())
+
+    def test_affected_validation_cases_preserve_decisive_facts_and_read_only_scope(self):
+        case_ids = (
+            "implement-with-subagents-solo-chain-direct",
+            "implement-with-subagents-solo-review-unavailable-negative",
+            "implement-with-subagents-late-fanout-novel",
+            "shepherd-direct-poll-direct",
+            "shepherd-large-log-helper-novel",
+            "deliver-spec-shared-structure-direct",
+            "deliver-spec-fixture-calibration-direct",
+            "to-plan-fixture-calibration-novel",
+            "shepherd-rendering-consumers-novel",
+            "deliver-spec-fixture-restraint-negative",
+            "to-plan-fixture-restraint-negative",
+        )
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+        cases = {case.id: case for case in report.cases}
+        self.assertEqual({"direct", "novel", "negative"}, {cases[key].kind for key in case_ids})
+        for case_id in case_ids:
+            case = cases[case_id]
+            with self.subTest(case=case_id), tempfile.TemporaryDirectory() as directory:
+                self.assertTrue(case.calibration)
+                self.assertTrue(case.forbid_all_commands)
+                self.assertEqual("review", case.task_mode)
+                self.assertEqual((), case.allowed_write_paths)
+                workspace = prepare_workspace(
+                    case, REPO_ROOT, Path(directory) / "fixture",
+                    enabled_skills=case.target_skills,
+                )
+                state_file = workspace / "state.md"
+                original = state_file.read_text(encoding="utf-8")
+                # Command-free cases must expose every decisive fact in the prompt.
+                self.assertIn(original, case.prompt)
+                argv = [sys.executable, str(REPO_ROOT / "evals/validators/text_case.py"), case_id]
+
+                def validate():
+                    return subprocess.run(argv, cwd=workspace, capture_output=True, text=True)
+
+                valid = validate()
+                self.assertEqual(0, valid.returncode, valid.stderr)
+                # Missing acceptance, evidence or uncertainty changes the decision.
+                # Ensure every supplied scenario fact is protected by the validator.
+                facts = json.loads((case.directory / "expectations.json").read_text())["must_contain"]
+                for fact in facts:
+                    with self.subTest(missing=fact):
+                        state_file.write_text(original.replace(fact, "", 1), encoding="utf-8")
+                        invalid = validate()
+                        self.assertEqual(1, invalid.returncode)
+                        self.assertIn("missing required evidence", invalid.stderr)
+                state_file.write_text(original, encoding="utf-8")
+                self.assertEqual(0, validate().returncode)
+
+    def test_subagent_handoff_reference_is_self_contained_for_each_consumer(self):
+        shared = (REPO_ROOT / "references/subagent-selection.md").read_bytes()
+        consumers = {
+            "deliver-spec": "references/implementation-mode.md",
+            "implement-with-subagents": "references/implementation-mode.md",
+            "run-github-project": "references/ticket-lifecycle.md",
+            "gradle-run": "SKILL.md",
+            "shepherd": "SKILL.md",
+        }
+        for skill, caller in consumers.items():
+            with self.subTest(skill=skill):
+                directory = REPO_ROOT / "skills" / skill
+                reference = directory / "references/subagent-selection.md"
+                self.assertFalse(reference.is_symlink())
+                self.assertEqual(shared, reference.read_bytes())
+                self.assertIn(
+                    "subagent-selection.md",
+                    (directory / caller).read_text(encoding="utf-8"),
+                )
+
+    def test_deliver_spec_stages_its_complete_implementation_procedure_alone(self):
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+        case = next(case for case in report.cases if case.id == "deliver-spec-direct")
+        self.assertEqual(("deliver-spec",), case.target_skills)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = prepare_workspace(
+                case, REPO_ROOT, Path(temp_dir) / "fixture",
+                enabled_skills=case.target_skills,
+            )
+            installed = workspace / ".agents/skills"
+            self.assertFalse((installed / "implement-with-subagents").exists())
+            delivery = installed / "deliver-spec"
+            procedure = delivery / "references/implementation-mode.md"
+            self.assertEqual(
+                (REPO_ROOT / "skills/deliver-spec/references/implementation-mode.md").read_bytes(),
+                procedure.read_bytes(),
+            )
+            # Follow the mandatory local resource chain in the isolated installation.
+            for source, target in (
+                (delivery / "SKILL.md", "references/implementation-mode.md"),
+                (delivery / "references/project-handoff.md", "implementation-mode.md"),
+                (procedure, "subagent-selection.md"),
+            ):
+                with self.subTest(source=source.name):
+                    links = re.findall(r"\]\(([^)]+)\)", source.read_text(encoding="utf-8"))
+                    self.assertIn(target, links)
+                    self.assertTrue((source.parent / target).is_file())
+            self.assertEqual(
+                (REPO_ROOT / "references/subagent-selection.md").read_bytes(),
+                (procedure.parent / "subagent-selection.md").read_bytes(),
+            )
+            self.assertIn("## Runtime requirements", procedure.read_text(encoding="utf-8"))
+
+    def test_project_execution_routes_mandatory_scheduler_and_review_contracts(self):
+        entrypoint = (REPO_ROOT / "skills/run-github-project/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        controller = (
+            REPO_ROOT / "skills/run-github-project/references/execution-controller.md"
+        ).read_text(encoding="utf-8")
+        setup = (
+            REPO_ROOT / "skills/run-github-project/references/review-and-setup.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "`next` or `drain` | [Review and setup](references/review-and-setup.md) for binding validation",
+            entrypoint,
+        )
+        self.assertIn("validate the binding through the setup", controller)
+        self.assertIn("committed digest", setup)
+        self.assertIn("If any value is missing,", setup)
+        self.assertIn("references/drain-scheduler.md", entrypoint)
+        self.assertIn("references/review-contracts.md", entrypoint)
+        normalized = " ".join(entrypoint.split())
+        self.assertIn("before drain queue work", normalized)
+        self.assertIn("before acceptance work", normalized)
+        self.assertIn("drain-scheduler.md", controller)
+        self.assertIn("review-contracts.md", controller)
+
+    def test_subagent_flow_keeps_one_task_gate_and_repairs_forward(self):
+        entrypoint = (REPO_ROOT / "skills/implement-with-subagents/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("references/implementation-mode.md", entrypoint)
+        guidance = (
+            REPO_ROOT / "skills/implement-with-subagents/references/implementation-mode.md"
+        ).read_text(encoding="utf-8")
+        normalized = " ".join(guidance.split())
+        self.assertIn("approved test seams", normalized)
+        self.assertIn("owner self-review", normalized)
+        self.assertIn("before integration", normalized)
+        self.assertIn("no second lead sign-off", normalized)
+        self.assertIn("failed integrated `HEAD`", normalized)
+        self.assertIn("completed merge or cherry-pick", normalized)
+        self.assertIn("repair forward", normalized)
+        self.assertIn("final integrated HEAD", normalized)
+        self.assertIn("pre-attempt SHA", normalized)
+        self.assertIn("abort that operation", normalized)
+        self.assertIn("original owner, who replays its work", normalized)
+        self.assertIn("new isolated task branch", normalized)
+        self.assertNotIn("git reset --hard", guidance)
+        self.assertNotIn("invoke the installed `implement` skill", guidance)
+
+    def test_has_skill_triads_and_workflow_calibration_coverage_without_routing(self):
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+
+        benchmark = [case for case in report.cases if not case.calibration]
+        calibration = [case for case in report.cases if case.calibration]
+        self.assertEqual(41, len(benchmark))
+        self.assertEqual(119, len(calibration))
+        self.assertIn("grounded-writing", PUBLIC_SKILLS)
+        self.assertNotIn("implement", PUBLIC_SKILLS)
+        self.assertEqual(41, len(filter_cases(report.cases, case_ids=None, skills=None)))
+        self.assertFalse(any(case.kind == "routing" for case in report.cases))
+        self.assertEqual(
+            {
+                "grounded-writing-response-draft-novel",
+                "grounded-writing-short-reply-direct",
+                "grounded-writing-email-novel",
+                "grounded-writing-personal-gap-negative",
+                "grounded-writing-tutorial-detail-negative",
+                "grounded-writing-assistant-reply-negative",
+                "implement-with-subagents-missing-provider-challenge",
+                "run-github-project-missing-provider-challenge",
+                "to-plan-authorized-draft-direct",
+                "to-plan-integration-amendment-direct",
+                "to-plan-integration-amendment-novel",
+                "to-plan-integration-amendment-negative",
+                "to-plan-material-assumption-proof-calibration",
+                "to-plan-material-assumption-proof-novel",
+                "to-plan-specificity-calibration",
+                "to-plan-prior-confirmed-novel",
+                "to-plan-unresolved-choice-negative",
+                "to-plan-discussion-only-negative",
+                "implement-with-subagents-solo-chain-direct",
+                "implement-with-subagents-solo-review-unavailable-negative",
+                "implement-with-subagents-late-fanout-novel",
+                "shepherd-direct-poll-direct",
+                "shepherd-large-log-helper-novel",
+                "implement-with-subagents-reuse-direct",
+                "implement-with-subagents-stale-evidence-negative",
+                "implement-with-subagents-missing-output-negative",
+                "implement-with-subagents-post-edit-negative",
+                "implement-with-subagents-failed-verification-negative",
+                "implement-with-subagents-explicit-rerun-novel",
+                "implement-with-subagents-runtime-capability-calibration",
+                "implement-with-subagents-accepted-item-noop-calibration",
+                "implement-with-subagents-tdd-docs-direct",
+                "implement-with-subagents-fix-forward-novel",
+                "implement-with-subagents-final-review-stale-negative",
+                "implement-with-subagents-dirty-checkout-negative",
+                "implement-with-subagents-worktree-reuse-direct",
+                "implement-with-subagents-worktree-repair-novel",
+                "implement-with-subagents-worktree-retirement-negative",
+                "implement-with-subagents-worktree-cleanup-failure-negative",
+                "subagent-handoff-direct",
+                "subagent-handoff-novel",
+                "subagent-handoff-negative",
+                "delegation-context-direct",
+                "delegation-context-novel",
+                "delegation-context-restraint-negative",
+                "shepherd-host-monitor-direct",
+                "shepherd-host-monitor-setup",
+                "deliver-spec-concurrency-novel",
+                "deliver-spec-shared-discovery-direct",
+                "deliver-spec-shared-discovery-novel",
+                "deliver-spec-shared-discovery-restraint-negative",
+                "deliver-spec-worker-capacity-negative",
+                "deliver-spec-trivial-restraint-negative",
+                "run-github-project-delivery-direct",
+                "run-github-project-authority-pause-novel",
+                "run-github-project-current-column-novel",
+                "run-github-project-auto-merge-restraint-negative",
+                "deliver-spec-evidence-direct",
+                "deliver-spec-checkpoint-batch-direct",
+                "run-github-project-interruption-novel",
+                "run-github-project-bounded-evidence-direct",
+                "deliver-spec-broad-invalidation-novel",
+                "run-github-project-mandatory-full-novel",
+                "deliver-spec-checkpoint-restraint-negative",
+                "to-plan-validation-placement-direct",
+                "to-plan-validation-trigger-novel",
+                "to-plan-validation-restraint-negative",
+                "deliver-spec-integration-novel",
+                "deliver-spec-review-boundary-negative",
+                "deliver-spec-live-qualification-failure-direct",
+                "deliver-spec-live-qualification-retained-novel",
+                "deliver-spec-live-qualification-repair-direct",
+                "deliver-spec-live-qualification-material-decision-novel",
+                "deliver-spec-live-qualification-no-change-negative",
+                "deliver-spec-live-qualification-async-only-direct",
+                "deliver-spec-live-qualification-sync-persistence-direct",
+                "deliver-spec-github-plan-revision-approval-novel",
+                "run-github-project-live-qualification-preflight-direct",
+                "deliver-spec-review-convergence-direct",
+                "shepherd-boundary-diagnostics-novel",
+                "run-github-project-review-convergence-negative",
+                "to-plan-boundary-validation-direct",
+                "run-github-project-watcher-direct",
+                "run-github-project-watcher-wake-novel",
+                "run-github-project-watcher-next-negative",
+                "run-github-project-watcher-restraint-negative",
+                "run-github-project-watcher-unchanged-negative",
+                "deliver-spec-fast-path-direct",
+                "run-github-project-fast-path-direct",
+                "run-github-project-fast-path-novel",
+                "deliver-spec-fast-path-restraint-negative",
+                "deliver-spec-fast-path-escalation-novel",
+                "run-github-project-slot-release-direct",
+                "run-github-project-slot-release-novel",
+                "run-github-project-slot-release-restraint-negative",
+                "deliver-spec-review-pending-ci-direct",
+                "run-github-project-review-head-change-novel",
+                "shepherd-review-merge-gates-novel",
+                "deliver-spec-ci-full-suite-direct",
+                "deliver-spec-ci-full-suite-novel",
+                "deliver-spec-ci-full-suite-restraint-negative",
+                "to-plan-ci-baseline-direct",
+                "to-plan-ci-baseline-novel",
+                "to-plan-ci-baseline-restraint-negative",
+                "deliver-spec-shared-structure-direct",
+                "deliver-spec-fixture-calibration-direct",
+                "to-plan-fixture-calibration-novel",
+                "shepherd-rendering-consumers-novel",
+                "deliver-spec-fixture-restraint-negative",
+                "to-plan-fixture-restraint-negative",
+                "run-github-project-preparation-direct",
+                "deliver-spec-behavioral-dependency-novel",
+                "run-github-project-shared-seam-negative",
+                "deliver-spec-nested-reviewer-direct",
+                "deliver-spec-nested-helpers-novel",
+                "run-github-project-background-owners-negative",
+                "to-plan-payload-digest-direct",
+                "run-github-project-payload-digest-novel",
+                "to-plan-payload-digest-restraint-negative",
+            },
+            {case.id for case in calibration},
+        )
+        specificity = next(
+            case for case in calibration if case.id == "to-plan-specificity-calibration"
+        )
+        self.assertEqual("workflow-plan", specificity.fixture)
+        self.assertTrue(specificity.calibration)
+        self.assertIn("Both `manifest_reader.py:missing_manifest_error`", specificity.prompt)
+        self.assertNotIn("two slices", specificity.prompt.lower())
+        self.assertNotIn("t1", specificity.prompt.lower())
+        self.assertNotIn("t2", specificity.prompt.lower())
+        self.assertNotIn("test-first", specificity.prompt.lower())
+        self.assertNotIn("acceptance row", specificity.prompt.lower())
+        expectations = json.loads(
+            (specificity.directory / "expectations.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual([], expectations["task_graph"]["required_edges"])
+        self.assertTrue(expectations["task_graph"]["require_acyclic"])
+        self.assertEqual(
+            [
+                {
+                    "id": "missing-manifest",
+                    "owned_files": [
+                        "manifest_reader.py",
+                        "tests/test_manifest_reader.py",
+                    ],
+                    "owned_symbols": ["missing_manifest_error"],
+                },
+                {
+                    "id": "invalid-profile",
+                    "owned_files": [
+                        "profile_loader.py",
+                        "tests/test_profile_loader.py",
+                    ],
+                    "owned_symbols": ["invalid_profile_error"],
+                },
+            ],
+            expectations["task_graph"]["separate_slice_requirements"],
+        )
+        required_text = expectations["file_globs"][0]["must_contain"]
+        self.assertNotIn("path_diagnostics.py", required_text)
+        self.assertNotIn("quote_path", required_text)
+        overlay = specificity.directory / "overlay"
+        manifest = (overlay / "manifest_reader.py").read_text(encoding="utf-8")
+        profile = (overlay / "profile_loader.py").read_text(encoding="utf-8")
+        manifest_test = (overlay / "tests/test_manifest_reader.py").read_text(
+            encoding="utf-8"
+        )
+        profile_test = (overlay / "tests/test_profile_loader.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("return f\"manifest not found: {path}\"", manifest)
+        self.assertIn("return f\"invalid profile at {path}\"", profile)
+        self.assertIn('"manifest not found: configs/team manifest.json"', manifest_test)
+        self.assertIn('"invalid profile at configs/team manifest.json"', profile_test)
+        self.assertNotIn("'configs/team manifest.json'", manifest_test)
+        self.assertNotIn("'configs/team manifest.json'", profile_test)
+        rubric_ids = {criterion["id"] for criterion in specificity.rubric}
+        self.assertEqual(
+            {
+                "complete-coverage",
+                "baseline-and-red-green",
+                "independent-slice-boundaries",
+                "concrete-tests",
+                "consistent-dependencies",
+                "proportionality",
+                "planning-boundary",
+            },
+            rubric_ids,
+        )
+        proportionality = next(
+            criterion
+            for criterion in specificity.rubric
+            if criterion["id"] == "proportionality"
+        )
+        self.assertIn("avoids repeating detailed shared-contract requirements", proportionality["text"])
+        self.assertIn("allowing a brief Approach summary", proportionality["text"])
+        self.assertIn(
+            "names exact per-slice files, tests, inputs, and commands",
+            proportionality["text"],
+        )
+        self.assertIn("standard diagnosis and two-cycle repair limit", proportionality["text"])
+        with tempfile.TemporaryDirectory(prefix="workflow-plan-specificity-") as temp_dir:
+            workspace = prepare_workspace(
+                specificity, REPO_ROOT, Path(temp_dir) / "fixture"
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-B",
+                    "-m",
+                    "unittest",
+                    "tests.test_manifest_reader",
+                    "tests.test_profile_loader",
+                ],
+                cwd=workspace,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        for skill in WORKFLOWS_WRITING_SKILLS:
+            kinds = {case.kind for case in benchmark if skill in case.target_skills}
+            with self.subTest(skill=skill):
+                self.assertEqual({"direct", "novel", "negative"}, kinds)
+
+        self.assertEqual(
+            {
+                "to-plan-direct",
+                "to-plan-novel",
+                "to-plan-negative",
+            },
+            {
+                case.id
+                for case in benchmark
+                if case.target_skills == ("to-plan",)
+            },
+        )
+
+        subagent_cases = [
+            case
+            for case in benchmark
+            if case.fixture == "workflow-subagents" and not case.calibration
+        ]
+        self.assertEqual(3, len(subagent_cases))
+        self.assertTrue(
+            all(
+                case.target_skills == ("implement-with-subagents",)
+                and not case.constant_skills
+                for case in subagent_cases
+            )
+        )
+        self.assertTrue(
+            all(
+                not case.constant_skills
+                for case in report.cases
+                if case.fixture == "workflow"
+            )
+        )
+
+    def test_subagent_review_fixture_has_no_implementation_dependency(self):
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+        case = next(
+            case
+            for case in report.cases
+            if case.id == "implement-with-subagents-direct"
+        )
+        config = RunConfig(model="gpt-5.6-terra", reasoning="medium")
+
+        for arm in ("none", "forced", "automatic"):
+            with self.subTest(arm=arm), tempfile.TemporaryDirectory() as temp_dir:
+                workspace = Path(temp_dir) / "workspace"
+                command = build_subject_command(
+                    case, arm, REPO_ROOT, workspace, config, skill_paths=()
+                )
+                rendered = " ".join(command)
+                self.assertNotIn(".agents/skills/implement/SKILL.md", rendered)
+                self.assertNotIn("Evaluator-owned fixture dependencies", rendered)
+
+                prepare_workspace(
+                    case,
+                    REPO_ROOT,
+                    workspace,
+                    enabled_skills=automatically_invokable_public_skills(REPO_ROOT),
+                )
+                self.assertFalse(
+                    (workspace / ".agents/skills/implement/SKILL.md").exists()
+                )
+                if arm == "automatic":
+                    self.assertNotIn(
+                        str(
+                            workspace
+                            / ".agents"
+                            / "skills"
+                            / "implement-with-subagents"
+                            / "SKILL.md"
+                        ),
+                        rendered,
+                    )
+                    self.assertFalse(
+                        (
+                            workspace
+                            / ".agents"
+                            / "skills"
+                            / "implement-with-subagents"
+                        ).exists()
+                    )
+
+    def test_missing_tdd_challenge_has_no_provider_fixture(self):
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+        case = next(
+            case
+            for case in report.cases
+            if case.id == "implement-with-subagents-missing-provider-challenge"
+        )
+
+        self.assertEqual((), case.constant_skills)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir) / "workspace"
+            prepare_workspace(case, REPO_ROOT, workspace, enabled_skills=())
+
+            self.assertFalse(
+                (workspace / ".agents/skills/tdd/SKILL.md").exists()
+            )
+
+    def test_advanced_workflow_skills_require_explicit_invocation(self):
+        explicit_only = (
+            "deliver-spec",
+            "implement-with-subagents",
+            "run-github-project",
+            "shepherd",
+        )
+        # The Project controller chain invokes these through Claude Code's Skill tool.
+        delegated = ("deliver-spec", "shepherd")
+        for skill in explicit_only:
+            config = REPO_ROOT / "skills" / skill / "agents" / "openai.yaml"
+            entrypoint = REPO_ROOT / "skills" / skill / "SKILL.md"
+            with self.subTest(skill=skill):
+                self.assertIn(
+                    "allow_implicit_invocation: false",
+                    config.read_text(encoding="utf-8"),
+                )
+                check = self.assertNotIn if skill in delegated else self.assertIn
+                check(
+                    "disable-model-invocation: true",
+                    entrypoint.read_text(encoding="utf-8"),
+                )
+
+        self.assertEqual(
+            set(PUBLIC_SKILLS) - set(explicit_only),
+            set(automatically_invokable_public_skills(REPO_ROOT)),
+        )
+        schema = json.loads((REPO_ROOT / "skills.schema.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            "boolean",
+            schema["properties"]["disable-model-invocation"]["type"],
+        )
+        self.assertNotIn("paths", schema["properties"])
+
+    def test_automatic_conditions_exclude_explicit_only_workflow_skills(self):
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+
+        conditions = evaluation_conditions(REPO_ROOT, report.cases, ("automatic",))
+
+        self.assertEqual(
+            {
+                "grounded-writing-response-draft-novel",
+                "grounded-writing-short-reply-direct",
+                "grounded-writing-email-novel",
+                "grounded-writing-personal-gap-negative",
+                "grounded-writing-tutorial-detail-negative",
+                "grounded-writing-assistant-reply-negative",
+                "grounded-writing-direct",
+                "grounded-writing-novel",
+                "grounded-writing-negative",
+                "android-benchmark-comparison-direct",
+                "android-benchmark-comparison-novel",
+                "android-benchmark-comparison-negative",
+                "changelog-direct",
+                "changelog-novel",
+                "changelog-negative",
+                "release-kotlin-library-direct",
+                "release-kotlin-library-novel",
+                "release-kotlin-library-negative",
+                "to-plan-authorized-draft-direct",
+                "to-plan-boundary-validation-direct",
+                "to-plan-direct",
+                "to-plan-discussion-only-negative",
+                "to-plan-integration-amendment-direct",
+                "to-plan-integration-amendment-negative",
+                "to-plan-integration-amendment-novel",
+                "to-plan-material-assumption-proof-calibration",
+                "to-plan-material-assumption-proof-novel",
+                "to-plan-negative",
+                "to-plan-novel",
+                "to-plan-prior-confirmed-novel",
+                "to-plan-specificity-calibration",
+                "to-plan-unresolved-choice-negative",
+                "to-plan-validation-placement-direct",
+                "to-plan-validation-trigger-novel",
+                "to-plan-validation-restraint-negative",
+                "to-plan-ci-baseline-direct",
+                "to-plan-ci-baseline-novel",
+                "to-plan-ci-baseline-restraint-negative",
+                "to-plan-fixture-calibration-novel",
+                "to-plan-fixture-restraint-negative",
+                "run-github-project-preparation-direct",
+                "deliver-spec-behavioral-dependency-novel",
+                "run-github-project-shared-seam-negative",
+                "to-plan-payload-digest-direct",
+                "run-github-project-payload-digest-novel",
+                "to-plan-payload-digest-restraint-negative",
+            },
+            {case.id for case, _ in conditions},
+        )
+
+    def test_execution_skips_an_explicit_only_automatic_condition(self):
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+        case = next(
+            case for case in report.cases if case.id == "run-github-project-direct"
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "evals.harness.experiment.preflight"
+        ) as preflight:
+            paths = execute_experiment(
+                REPO_ROOT,
+                [case],
+                arms=["automatic"],
+                repetitions=1,
+                run_config=RunConfig("gpt-5.6-terra", "medium"),
+                judge_config=JudgeConfig("gpt-5.6-sol", "high"),
+                output_dir=Path(temp_dir),
+            )
+
+            self.assertEqual(
+                [], json.loads(paths["results"].read_text(encoding="utf-8"))
+            )
+
+        preflight.assert_not_called()
+
+    def test_legacy_automatic_records_are_reconciled_from_the_current_corpus(self):
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+        records = [
+            {"case_id": "run-github-project-direct", "arm": "automatic"},
+            {"case_id": "run-github-project-direct", "arm": "forced"},
+            {"case_id": "grounded-writing-direct", "arm": "automatic"},
+            {"case_id": "removed-case", "arm": "automatic"},
+        ]
+
+        reconcile_automatic_eligibility(REPO_ROOT, report.cases, records)
+
+        self.assertFalse(records[0]["automatic_eligible"])
+        self.assertFalse(records[1]["automatic_eligible"])
+        self.assertTrue(records[2]["automatic_eligible"])
+        self.assertEqual(["grounded-writing"], records[2]["expected_skills"])
+        self.assertFalse(records[3]["automatic_eligible"])
+
+    def test_no_skill_automatic_control_runs_without_routing_to_its_target(self):
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+        case = next(
+            case
+            for case in report.cases
+            if case.id == "android-benchmark-comparison-negative"
+        )
+
+        self.assertTrue(case.automatic_no_skill_control)
+        self.assertIn(
+            (case, "automatic"), evaluation_conditions(REPO_ROOT, (case,), ("automatic",))
+        )
+        records = [{"case_id": case.id, "arm": "automatic"}]
+        reconcile_automatic_eligibility(REPO_ROOT, report.cases, records)
+
+        self.assertTrue(records[0]["automatic_eligible"])
+        self.assertEqual([], records[0]["expected_skills"])
+        self.assertEqual([], records[0]["allowed_skills"])
+
+    def test_shepherd_novel_is_an_analysis_only_case(self):
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+        case = next(case for case in report.cases if case.id == "shepherd-novel")
+
+        self.assertTrue(case.forbid_all_commands)
+        self.assertIn("unnamed macOS check", case.prompt)
+        rubric = " ".join(item["text"] for item in case.rubric)
+        self.assertIn("exact check name", rubric)
+        self.assertIn("single forced-skill entrypoint read", rubric)
+        self.assertIn("required integrated-candidate checks", rubric)
+
+    def test_formatting_negative_supplies_the_text_and_preserves_the_noop(self):
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+        case = next(
+            case
+            for case in report.cases
+            if case.id == "android-benchmark-comparison-negative"
+        )
+        draft = (REPO_ROOT / "evals/fixtures/text/draft.md").read_text(encoding="utf-8").rstrip()
+        expectation = json.loads(
+            (case.directory / "expectations.json").read_text(encoding="utf-8")
+        )
+
+        self.assertIn(f"```text\n{draft}\n```", case.prompt)
+        self.assertLessEqual(max(map(len, draft.splitlines())), 80)
+        self.assertTrue(case.automatic_no_skill_control)
+        self.assertTrue(case.forbid_all_commands)
+        line_width_pattern = next(
+            pattern for pattern in expectation["must_not_match"] if "81" in pattern
+        )
+        flags = re.MULTILINE | re.DOTALL
+        self.assertGreater(len(draft), 80)
+        self.assertIsNone(re.search(line_width_pattern, draft, flags))
+        self.assertIsNone(re.search(line_width_pattern, "x" * 80, flags))
+        self.assertIsNotNone(re.search(line_width_pattern, "x" * 81, flags))
+
+    def test_benchmark_direct_accepts_spread_for_unavailable_variability(self):
+        expectation = json.loads(
+            (
+                REPO_ROOT
+                / "evals/cases/android-benchmark-comparison-direct/expectations.json"
+            ).read_text(encoding="utf-8")
+        )
+        variability_pattern = next(
+            pattern for pattern in expectation["must_match"] if "spread" in pattern
+        )
+        missing_data_pattern = next(
+            pattern
+            for pattern in expectation["must_match"]
+            if "not (?:provided|supplied|attached|included)" in pattern
+        )
+
+        self.assertIsNotNone(re.search(variability_pattern, "Per-run spread is unavailable."))
+        self.assertIsNotNone(re.search(variability_pattern, "Per-run variability is unavailable."))
+        self.assertIsNotNone(
+            re.search(
+                variability_pattern,
+                "The improved consistency cannot be quantified without raw results.",
+            )
+        )
+        self.assertIsNotNone(
+            re.search(
+                variability_pattern,
+                "The results were more consistent, but this does not establish which control caused it.",
+                re.DOTALL,
+            )
+        )
+        self.assertIsNotNone(
+            re.search(
+                variability_pattern,
+                "The results were more consistent. The evidence does not isolate the effect of affinity.",
+                re.DOTALL,
+            )
+        )
+        self.assertIsNone(re.search(variability_pattern, "Results were more consistent."))
+        self.assertIsNone(re.search(variability_pattern, "Per-run range is unavailable."))
+        self.assertIsNotNone(
+            re.search(missing_data_pattern, "The raw traces were not supplied.")
+        )
+        self.assertIsNotNone(
+            re.search(missing_data_pattern, "The raw results and traces were not included.")
+        )
+        self.assertIsNotNone(
+            re.search(missing_data_pattern, "The note does not include raw results or traces.")
+        )
+
+    def test_benchmark_direct_accepts_explicit_absence_of_raw_results_and_traces(self):
+        expectation = json.loads(
+            (
+                REPO_ROOT
+                / "evals/cases/android-benchmark-comparison-direct/expectations.json"
+            ).read_text(encoding="utf-8")
+        )
+        missing_data_pattern = next(
+            pattern
+            for pattern in expectation["must_match"]
+            if "not (?:provided|supplied|attached|included)" in pattern
+        )
+
+        accepted = (
+            "The report contains no raw results or traces.",
+            "The report contains neither the raw results nor traces.",
+            "Neither raw results nor traces are included in the supplied evidence.",
+            "The note does not provide its location, raw results, or traces.",
+        )
+        saved_report_excerpts = (
+            "The run record is referenced, but the supplied evidence contains no raw\n"
+            "results or traces. It also gives no completed-case or iteration counts, so\n"
+            "coverage cannot be verified.",
+            "The note references a run record, but the supplied material contains neither\n"
+            "the raw results nor traces. It also gives no completed-case or iteration\n"
+            "counts, metric definition, per-run spread, or exact device and run conditions.",
+        )
+        partial_evidence = (
+            "The report contains no raw results, but the traces are available.",
+            "The report includes the raw results and traces.",
+            "Neither raw results nor traces are fabricated here; both are attached.",
+            "The note does not provide raw results, but traces are attached.",
+        )
+
+        for text in (*accepted, *saved_report_excerpts):
+            with self.subTest(text=text):
+                self.assertIsNotNone(re.search(missing_data_pattern, text))
+
+        for text in partial_evidence:
+            with self.subTest(text=text):
+                self.assertIsNone(re.search(missing_data_pattern, text))
+
+    def test_benchmark_count_guards_ignore_citations_and_build_metadata(self):
+        expectation = json.loads(
+            (
+                REPO_ROOT
+                / "evals/cases/android-benchmark-comparison-direct/expectations.json"
+            ).read_text(encoding="utf-8")
+        )
+        patterns = expectation["must_not_match"]
+        unsupported_claims = (
+            "This benchmark comparison completed 12 cases and recorded 8 iterations.",
+            "Benchmark cases: 12; benchmark iterations: 8.",
+        )
+        harmless_context = (
+            "Build 51 on API 35; issue #42; see case 4 in Appendix 3.",
+            "Historical metadata lists 4 cases in source note [8]; schema v2.1; build 4.3.",
+            "Archived run metadata: completed cases=12; iteration count=8.",
+        )
+
+        for text in unsupported_claims:
+            with self.subTest(text=text):
+                self.assertTrue(
+                    any(re.search(pattern, text) for pattern in patterns)
+                )
+
+        for text in harmless_context:
+            with self.subTest(text=text):
+                self.assertFalse(any(re.search(pattern, text) for pattern in patterns))
+
+    def assert_prompt_does_not_disclose_skills(self, prompt, skills):
+        prompt = prompt.lower()
+        self.assertNotIn("$", prompt)
+        for skill in skills:
+            if skill != "changelog":
+                self.assertNotIn(skill, prompt)
+                continue
+            # The artifact name is ordinary task language; explicit skill references leak routing.
+            self.assertNotRegex(
+                prompt,
+                r"""[`'"]changelog[`'"]|\bchangelog\s+skill\b|"""
+                r"""\bskill\s+(?:named\s+)?[`'"]?changelog\b|"""
+                r"\b(?:use|invoke|load|run)\s+(?:the\s+)?changelog(?!\.md\b)"
+                r"(?=\s*(?:$|[.!?,;:]|\b(?:to|for|on)\b))|"
+                r"\bchangelog[/\\]skill\.md\b|\b[\w-]+:changelog\b",
+            )
+
+    def test_workflow_prompts_do_not_disclose_the_target_skill(self):
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+
+        for case in report.cases:
+            with self.subTest(case=case.id):
+                self.assert_prompt_does_not_disclose_skills(case.prompt, case.expected_skills)
+
+    def test_prompt_disclosure_guard_allows_changelog_task_language(self):
+        for prompt in (
+            "Update CHANGELOG.md with the missing changelog entries.",
+            "The changelog renderer supports HTML details blocks.",
+            "Use changelog entries to write a release summary.",
+            "Load CHANGELOG.md.",
+        ):
+            with self.subTest(prompt=prompt):
+                self.assert_prompt_does_not_disclose_skills(prompt, ("changelog",))
+
+    def test_prompt_disclosure_guard_rejects_explicit_skill_references(self):
+        for prompt, skill in (
+            ("Use $changelog to update the notes.", "changelog"),
+            ("Use changelog.", "changelog"),
+            ("Invoke changelog.", "changelog"),
+            ("Use changelog to update the notes.", "changelog"),
+            ("Run changelog on this repository.", "changelog"),
+            ("Use the changelog skill.", "changelog"),
+            ("Use the skill named changelog.", "changelog"),
+            ("Use `changelog`.", "changelog"),
+            ("Use 'changelog'.", "changelog"),
+            ("Read skills/changelog/SKILL.md.", "changelog"),
+            ("Use chrisbanes-skills:changelog.", "changelog"),
+            ("Use release-kotlin-library.", "release-kotlin-library"),
+        ):
+            with self.subTest(prompt=prompt), self.assertRaises(AssertionError):
+                self.assert_prompt_does_not_disclose_skills(prompt, (skill,))
+
+    def test_review_prompts_allow_skill_instruction_reads(self):
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+
+        for case in report.cases:
+            with self.subTest(case=case.id):
+                self.assertNotIn("do not run agents, commands", case.prompt.lower())
+
+    def test_grounded_writing_validator_accepts_public_quality_guidance(self):
+        validator = REPO_ROOT / "evals/validators/text_case.py"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "draft.md").write_text(
+                "`Full` keeps the complete effect when visual fidelity matters. "
+                "Choose `Adaptive` during sustained interaction when steadier "
+                "performance matters more than the visible detail it reduces. "
+                "The settings preserve the same public API; Adaptive remains "
+                "experimental on Android backdrops.\n",
+                encoding="utf-8",
+            )
+
+            completed = subprocess.run(
+                ["python3", str(validator), "grounded-writing-direct"],
+                cwd=workspace,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_writing_calibration_validators_check_claims_and_supplied_facts(self):
+        validator = REPO_ROOT / "evals/validators/text_case.py"
+        samples = {
+            "grounded-writing-short-reply-direct": (
+                "Please add an idempotency key to saveDraft: its three retries can create duplicate records.\n",
+                "I tested this. Please add an idempotency key to saveDraft: its three retries can create duplicate records.\n",
+            ),
+            "grounded-writing-email-novel": (
+                "Hi Alex, I can meet Tuesday at 10:00 or Thursday at 14:00. Which works for you?\n",
+                "Hi Alex, I can meet Tuesday at 10:00. Which works for you?\n",
+            ),
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            for case_id, (valid, invalid) in samples.items():
+                for content, expected in ((valid, 0), (invalid, 1)):
+                    with self.subTest(case=case_id, expected=expected):
+                        (workspace / "draft.md").write_text(content, encoding="utf-8")
+                        result = subprocess.run(
+                            [sys.executable, str(validator), case_id],
+                            cwd=workspace, text=True, capture_output=True, check=False,
+                        )
+                        self.assertEqual(expected, result.returncode, result.stderr)
+
+    def test_short_reply_validator_requires_each_supporting_fact(self):
+        validator = REPO_ROOT / "evals/validators/text_case.py"
+        samples = (
+            ("Please add an idempotency key to saveDraft: it retries three times and can create duplicate records.", 0),
+            ("Please add an idempotency key to saveDraft: its 3 retries can create duplicate records.", 0),
+            ("Please add an idempotency key to saveDraft: it retries the operation three times and can create duplicate records.", 0),
+            ("Please add an idempotency key to saveDraft: after three retries, records may be duplicated.", 0),
+            ("Please add an idempotency key to saveDraft: its 3 retries risk duplication.", 0),
+            ("Please add an idempotency key to saveDraft.", 1),
+            ("Please add an idempotency key to saveDraft: it can create duplicate records.", 1),
+            ("Please add an idempotency key to saveDraft: it retries three times.", 1),
+            ("Please add an idempotency key to saveDraft: it retries twice and can create duplicate records.", 1),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            for content, expected in samples:
+                with self.subTest(content=content):
+                    (workspace / "draft.md").write_text(content, encoding="utf-8")
+                    result = subprocess.run(
+                        [sys.executable, str(validator), "grounded-writing-short-reply-direct"],
+                        cwd=workspace, text=True, capture_output=True, check=False,
+                    )
+                    self.assertEqual(expected, result.returncode, result.stderr)
+
+    def test_writing_style_sources_are_exclusively_chris_banes(self):
+        references = REPO_ROOT / "skills/grounded-writing/references"
+        for filename in ("style-profile.md", "source-observations.md"):
+            with self.subTest(file=filename):
+                text = (references / filename).read_text(encoding="utf-8")
+                urls = re.findall(r"https?://[^\s)]+", text)
+                if filename == "source-observations.md":
+                    self.assertTrue(urls, "Keep inspectable source evidence for the voice profile")
+                for url in urls:
+                    self.assertEqual("chrisbanes.me", urlsplit(url).hostname, url)
+
+    def test_writing_calibration_restraint_and_routing_boundaries(self):
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+        cases = {case.id: case for case in report.cases}
+        for suffix in ("personal-gap-negative", "tutorial-detail-negative", "assistant-reply-negative", "response-draft-novel"):
+            case_id = "grounded-writing-" + suffix
+            with self.subTest(case=case_id):
+                case = cases[case_id]
+                self.assertEqual((), case.allowed_write_paths)
+                self.assertTrue(case.calibration)
+                result = subprocess.run(
+                    [sys.executable, str(REPO_ROOT / "evals/validators/text_case.py"), case_id],
+                    cwd=REPO_ROOT / "evals/cases" / case_id / "overlay",
+                    text=True, capture_output=True, check=False,
+                )
+                self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue(cases["grounded-writing-assistant-reply-negative"].automatic_no_skill_control)
+        self.assertFalse(cases["grounded-writing-tutorial-detail-negative"].automatic_no_skill_control)
+
+    def test_plan_artifact_validator_requires_one_marked_local_draft(self):
+        validator = REPO_ROOT / "evals/validators/text_case.py"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            draft = workspace / ".scratch/to-plan/repair-validator-output.md"
+            draft.parent.mkdir(parents=True)
+            draft.write_text(plan_artifact(), encoding="utf-8")
+
+            completed = subprocess.run(
+                ["python3", str(validator), "to-plan-authorized-draft-direct"],
+                cwd=workspace,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_task_graph_validator_accepts_required_dependency_edge(self):
+        subject = (
+            "## Implementation slices\n\n"
+            "### 1. Prepare a compatible model\n"
+            "**Task ID:** `T1`\n"
+            "**Depends on:** `none`\n\n"
+            "### 2. Wire the model into the endpoint\n"
+            "**Task ID:** `T2`\n"
+            "**Depends on:** `T1`\n"
+        )
+
+        failures = validate_task_graph(
+            subject,
+            {"required_edges": [["T2", "T1"]], "require_acyclic": True},
+        )
+
+        self.assertEqual([], failures)
+
+    def test_specificity_validator_rejects_grouped_independent_call_sites(self):
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+        case = next(
+            case for case in report.cases if case.id == "to-plan-specificity-calibration"
+        )
+        rules = json.loads(
+            (case.directory / "expectations.json").read_text(encoding="utf-8")
+        )
+        grouped = (
+            "## Implementation slices\n\n"
+            "### 1. Quote both diagnostics\n"
+            "**Task ID:** `T1`\n"
+            "**Depends on:** `none`\n"
+            "**Files and symbols:** Edit `manifest_reader.py` and "
+            "`tests/test_manifest_reader.py`; edit `profile_loader.py` and "
+            "`tests/test_profile_loader.py`.\n"
+            "## Acceptance coverage\n"
+        )
+        separation_failures = validate_task_graph(grouped, rules["task_graph"])
+        self.assertTrue(
+            any("share slice" in failure for failure in separation_failures),
+            separation_failures,
+        )
+
+        separated = (
+            "## Implementation slices\n\n"
+            "### 1. Quote missing-manifest paths\n"
+            "**Task ID:** `T1`\n"
+            "**Depends on:** `none`\n"
+            "**Files and symbols:** Existing `tests/test_manifest_reader.py` —\n"
+            "`ManifestReaderTest.test_quotes_missing_manifest_path`; existing\n"
+            "`manifest_reader.py` — `missing_manifest_error(path: str) -> str`.\n"
+            "**Test:** Change the manifest assertion and observe a red test.\n"
+            "**Implementation:** Change `manifest_reader.py` to quote the path.\n\n"
+            "### 2. Quote invalid-profile paths\n"
+            "**Task ID:** `T2`\n"
+            "**Depends on:** `none`\n"
+            "**Files and symbols:** Existing `tests/test_profile_loader.py` —\n"
+            "`ProfileLoaderTest.test_quotes_invalid_profile_path`; existing\n"
+            "`profile_loader.py` — `invalid_profile_error(path: str) -> str`.\n"
+            "**Test:** Change the profile assertion and observe a red test.\n"
+            "**Implementation:** Change `profile_loader.py` to quote the path.\n"
+            "## Acceptance coverage\n"
+        )
+        separated = separated.replace(
+            "**Implementation:** Change `manifest_reader.py` to quote the path.\n",
+            "**Implementation:** Change `manifest_reader.py` to quote the path.\n"
+            "**Validate:** Also inspect `profile_loader.py` and `tests/test_profile_loader.py`.\n",
+        )
+        self.assertEqual(
+            [],
+            validate_task_graph(separated, rules["task_graph"]),
+        )
+
+        inspection_only = separated.replace(
+            "**Files and symbols:** Existing `tests/test_profile_loader.py` —\n"
+            "`ProfileLoaderTest.test_quotes_invalid_profile_path`; existing\n"
+            "`profile_loader.py` — `invalid_profile_error(path: str) -> str`.\n",
+            "**Files and symbols:** Inspect `profile_loader.py` and "
+            "`tests/test_profile_loader.py`; no edit required.\n",
+        )
+        inspection_failures = validate_task_graph(inspection_only, rules["task_graph"])
+        self.assertTrue(
+            any("invalid-profile" in failure for failure in inspection_failures),
+            inspection_failures,
+        )
+
+        hidden_grouping = separated.replace(
+            "**Implementation:** Change `manifest_reader.py` to quote the path.\n",
+            "**Implementation:** Change `manifest_reader.py` to quote the path; "
+            "also change `profile_loader.py` and `tests/test_profile_loader.py` here.\n",
+        )
+        hidden_failures = validate_task_graph(hidden_grouping, rules["task_graph"])
+        self.assertTrue(
+            any("edits independent behavior 'invalid-profile'" in failure for failure in hidden_failures),
+            hidden_failures,
+        )
+
+        hidden_symbol = separated.replace(
+            "**Implementation:** Change `manifest_reader.py` to quote the path.\n",
+            "**Implementation:** Change `manifest_reader.py` to quote the path; "
+            "also update `invalid_profile_error` here.\n",
+        )
+        symbol_failures = validate_task_graph(hidden_symbol, rules["task_graph"])
+        self.assertTrue(
+            any("edits independent behavior 'invalid-profile'" in failure for failure in symbol_failures),
+            symbol_failures,
+        )
+
+        later_edit = separated.replace(
+            "**Implementation:** Change `manifest_reader.py` to quote the path.\n",
+            "**Implementation:** Change `manifest_reader.py` to quote the path; "
+            "inspect `profile_loader.py` for conventions, then edit "
+            "`profile_loader.py` here.\n",
+        )
+        later_edit_failures = validate_task_graph(later_edit, rules["task_graph"])
+        self.assertTrue(
+            any("edits independent behavior 'invalid-profile'" in failure for failure in later_edit_failures),
+            later_edit_failures,
+        )
+
+        unmatched_edit = separated.replace(
+            "## Implementation slices\n\n",
+            "## Implementation slices\n\n"
+            "### 1. Edit both formatters\n"
+            "**Task ID:** `T0`\n**Depends on:** `none`\n"
+            "**Files and symbols:** Edit `manifest_reader.py` and "
+            "`profile_loader.py`.\n\n",
+        ).replace(
+            "### 1. Quote missing-manifest paths", "### 2. Quote missing-manifest paths"
+        ).replace(
+            "### 2. Quote invalid-profile paths", "### 3. Quote invalid-profile paths"
+        )
+        unmatched_failures = validate_task_graph(unmatched_edit, rules["task_graph"])
+        self.assertTrue(
+            any("slice 'T0' edits independent behavior" in failure for failure in unmatched_failures),
+            unmatched_failures,
+        )
+
+        implement_wording = separated.replace(
+            "**Implementation:** Change `manifest_reader.py` to quote the path.\n",
+            "**Implementation:** Change `manifest_reader.py` to quote the path; "
+            "implement quoting in `profile_loader.py` here.\n",
+        )
+        implement_failures = validate_task_graph(implement_wording, rules["task_graph"])
+        self.assertTrue(
+            any("edits independent behavior 'invalid-profile'" in failure for failure in implement_failures),
+            implement_failures,
+        )
+
+        verification_only = separated.replace(
+            "**Implementation:** Change `manifest_reader.py` to quote the path.\n",
+            "**Implementation:** Change `manifest_reader.py` to quote the path. "
+            "Inspect `profile_loader.py` and `tests/test_profile_loader.py` "
+            "afterward to verify no regression.\n",
+        )
+        self.assertEqual(
+            [],
+            validate_task_graph(verification_only, rules["task_graph"]),
+        )
+
+        mixed_actions = separated.replace(
+            "**Files and symbols:** Existing `tests/test_manifest_reader.py` —\n"
+            "`ManifestReaderTest.test_quotes_missing_manifest_path`; existing\n"
+            "`manifest_reader.py` — `missing_manifest_error(path: str) -> str`.\n",
+            "**Files and symbols:** Edit `manifest_reader.py` and "
+            "`tests/test_manifest_reader.py`, and inspect `profile_loader.py` "
+            "and `tests/test_profile_loader.py`.\n",
+        )
+        self.assertEqual(
+            [],
+            validate_task_graph(mixed_actions, rules["task_graph"]),
+        )
+
+        unchanged_reference = separated.replace(
+            "`manifest_reader.py` — `missing_manifest_error(path: str) -> str`.\n",
+            "`manifest_reader.py` — `missing_manifest_error(path: str) -> str`; "
+            "leave `profile_loader.py` and `tests/test_profile_loader.py` unchanged.\n",
+        )
+        self.assertEqual(
+            [],
+            validate_task_graph(unchanged_reference, rules["task_graph"]),
+        )
+
+        mixed_unchanged = separated.replace(
+            "**Files and symbols:** Existing `tests/test_manifest_reader.py` —\n"
+            "`ManifestReaderTest.test_quotes_missing_manifest_path`; existing\n"
+            "`manifest_reader.py` — `missing_manifest_error(path: str) -> str`.\n",
+            "**Files and symbols:** Edit `manifest_reader.py` and "
+            "`tests/test_manifest_reader.py`, leave `profile_loader.py` unchanged.\n",
+        )
+        self.assertEqual(
+            [],
+            validate_task_graph(mixed_unchanged, rules["task_graph"]),
+        )
+
+        mixed_no_edit = mixed_unchanged.replace(
+            "leave `profile_loader.py` unchanged",
+            "do not edit `profile_loader.py`",
+        )
+        self.assertEqual(
+            [],
+            validate_task_graph(mixed_no_edit, rules["task_graph"]),
+        )
+
+        unchanged_symbol = separated.replace(
+            "**Implementation:** Change `manifest_reader.py` to quote the path.\n",
+            "**Implementation:** Change `manifest_reader.py` to quote the path "
+            "while keeping `invalid_profile_error` unchanged.\n",
+        )
+        self.assertEqual(
+            [],
+            validate_task_graph(unchanged_symbol, rules["task_graph"]),
+        )
+
+        dotted_paths = separated
+        for path in (
+            "manifest_reader.py",
+            "tests/test_manifest_reader.py",
+            "profile_loader.py",
+            "tests/test_profile_loader.py",
+        ):
+            dotted_paths = dotted_paths.replace(f"`{path}`", f"`./{path}`")
+        self.assertEqual(
+            [],
+            validate_task_graph(dotted_paths, rules["task_graph"]),
+        )
+
+        existing_inspection_only = separated.replace(
+            "**Files and symbols:** Existing `tests/test_profile_loader.py` —\n"
+            "`ProfileLoaderTest.test_quotes_invalid_profile_path`; existing\n"
+            "`profile_loader.py` — `invalid_profile_error(path: str) -> str`.\n",
+            "**Files and symbols:** Existing `profile_loader.py` — inspect only, "
+            "no edit; existing `tests/test_profile_loader.py` — inspect only, no edit.\n",
+        ).replace(
+            "**Implementation:** Change `profile_loader.py` to quote the path.\n",
+            "**Implementation:** No change required.\n",
+        )
+        existing_inspection_failures = validate_task_graph(
+            existing_inspection_only, rules["task_graph"]
+        )
+        self.assertTrue(
+            any("invalid-profile" in failure for failure in existing_inspection_failures),
+            existing_inspection_failures,
+        )
+
+        revision4_artifact = (
+            REPO_ROOT / "evals/artifacts/2026-09-24-to-plan-specificity-revision4-run.md"
+        ).read_text(encoding="utf-8")
+        revision4_plan = re.search(r"```markdown\n(.*?)\n```", revision4_artifact, re.DOTALL)
+        self.assertIsNotNone(revision4_plan)
+        self.assertEqual(
+            [],
+            validate_task_graph(revision4_plan.group(1), rules["task_graph"]),
+        )
+
+        test_file_only = separated.replace(
+            "`manifest_reader.py` — `missing_manifest_error(path: str) -> str`.",
+            "",
+        )
+        ownership_failures = validate_task_graph(test_file_only, rules["task_graph"])
+        self.assertTrue(
+            any("missing-manifest" in failure for failure in ownership_failures),
+            ownership_failures,
+        )
+
+        wrong_prefix = separated.replace(
+            "tests/test_manifest_reader.py", "other/tests/test_manifest_reader.py"
+        ).replace(
+            "tests/test_profile_loader.py", "other/tests/test_profile_loader.py"
+        )
+        prefix_failures = validate_task_graph(wrong_prefix, rules["task_graph"])
+        self.assertTrue(
+            any("missing-manifest" in failure for failure in prefix_failures),
+            prefix_failures,
+        )
+        self.assertTrue(
+            any("invalid-profile" in failure for failure in prefix_failures),
+            prefix_failures,
+        )
+
+        dependent = separated.replace(
+            "### 2. Quote invalid-profile paths\n"
+            "**Task ID:** `T2`\n**Depends on:** `none`",
+            "### 2. Prepare shared fixture\n"
+            "**Task ID:** `T3`\n**Depends on:** `T1`\n\n"
+            "### 3. Quote invalid-profile paths\n"
+            "**Task ID:** `T2`\n**Depends on:** `T3`",
+        )
+        dependency_failures = validate_task_graph(dependent, rules["task_graph"])
+        self.assertTrue(
+            any("must not depend on each other" in failure for failure in dependency_failures),
+            dependency_failures,
+        )
+
+    def test_specificity_proportionality_rejects_prior_verbose_plan(self):
+        artifact = (
+            REPO_ROOT
+            / "evals/artifacts/2026-09-24-to-plan-specificity-targeted-repair-run.md"
+        ).read_text(encoding="utf-8")
+        verbose_plan = re.search(r"```markdown\n(.*?)\n```", artifact, re.DOTALL)
+        self.assertIsNotNone(verbose_plan)
+        self.assertIn("## Allowed deviations", verbose_plan.group(1))
+        self.assertIn("## Re-plan triggers", verbose_plan.group(1))
+
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+        case = next(
+            case for case in report.cases if case.id == "to-plan-specificity-calibration"
+        )
+        with tempfile.TemporaryDirectory(prefix="workflow-plan-proportionality-") as temp_dir:
+            workspace = Path(temp_dir)
+            plan_path = workspace / ".scratch/to-plan/verbose.md"
+            plan_path.parent.mkdir(parents=True)
+            plan_path.write_text(verbose_plan.group(1), encoding="utf-8")
+            completed = subprocess.run(
+                [sys.executable, "-B", str(REPO_ROOT / "evals/validators/text_case.py"), case.id],
+                cwd=workspace,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn("forbidden evidence remains", completed.stderr)
+        self.assertIn("Allowed deviations", completed.stderr)
+
+        concise_plan = (
+            "<!-- to-plan:conversation-plan:v1 id=123e4567-e89b-42d3-a456-426614174000 -->\n"
+            "# Quote diagnostic paths\n\n"
+            "## Approach\n\n"
+            "Quote each diagnostic path and verify both focused tests.\n\n"
+            "## Implementation context\n\n"
+            "`manifest_reader.py:missing_manifest_error` and "
+            "`profile_loader.py:invalid_profile_error` preserve their prefixes and path text.\n\n"
+            "## Implementation slices\n\n"
+            "### 1. Quote missing-manifest paths\n"
+            "**Task ID:** `T1`\n**Depends on:** `none`\n"
+            "**Files and symbols:** Edit `manifest_reader.py`, "
+            "`tests/test_manifest_reader.py`.\n"
+            "**Test:** Change the exact expected output for "
+            "`configs/team manifest.json` to `manifest not found: 'configs/team manifest.json'`; "
+            "run `python3 -B -m unittest tests.test_manifest_reader` before the implementation "
+            "and observe the unquoted result fail.\n"
+            "**Implementation:** Change `manifest_reader.py` to return the quoted path.\n"
+            "**Validate:** From the repository root, run "
+            "`python3 -B -m unittest tests.test_manifest_reader`; the test passes.\n"
+            "**Complete when:** The exact quoted result passes its focused test.\n\n"
+            "### 2. Quote invalid-profile paths\n"
+            "**Task ID:** `T2`\n**Depends on:** `none`\n"
+            "**Files and symbols:** Edit `profile_loader.py`, "
+            "`tests/test_profile_loader.py`.\n"
+            "**Test:** Change the exact expected output for "
+            "`configs/team manifest.json` to `invalid profile at 'configs/team manifest.json'`; "
+            "run `python3 -B -m unittest tests.test_profile_loader` before the implementation "
+            "and observe the unquoted result fail.\n"
+            "**Implementation:** Change `profile_loader.py` to return the quoted path.\n"
+            "**Validate:** From the repository root, run "
+            "`python3 -B -m unittest tests.test_profile_loader`; the test passes.\n"
+            "**Complete when:** The exact quoted result passes its focused test.\n\n"
+            "## Acceptance coverage\n\n"
+            "| Criterion | Slice | Verification |\n| --- | ---: | --- |\n"
+            "| Missing-manifest path is quoted unchanged. | 1 | T1 focused test. |\n"
+            "| Invalid-profile path is quoted unchanged. | 2 | T2 focused test. |\n"
+        )
+        with tempfile.TemporaryDirectory(prefix="workflow-plan-concise-") as temp_dir:
+            workspace = Path(temp_dir)
+            plan_path = workspace / ".scratch/to-plan/concise.md"
+            plan_path.parent.mkdir(parents=True)
+            plan_path.write_text(concise_plan, encoding="utf-8")
+            completed = subprocess.run(
+                [sys.executable, "-B", str(REPO_ROOT / "evals/validators/text_case.py"), case.id],
+                cwd=workspace,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_material_assumption_proof_case_requires_dependent_implementation(self):
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+        case = next(
+            case
+            for case in report.cases
+            if case.id == "to-plan-material-assumption-proof-calibration"
+        )
+        self.assertEqual("workflow-report-publication", case.fixture)
+        self.assertTrue(case.calibration)
+        self.assertIn("early-proof", case.prompt)
+        self.assertIn("T3 must depend directly on T1, as well as T2", case.prompt)
+        fixture = REPO_ROOT / "evals/fixtures/workflow-report-publication"
+        publisher = (fixture / "report_publisher.py").read_text(encoding="utf-8")
+        config = json.loads((fixture / "report_config.json").read_text(encoding="utf-8"))
+        self.assertIn("def publish_report", publisher)
+        self.assertIn("published.write_bytes(contents)", publisher)
+        self.assertNotIn("os.replace", publisher)
+        self.assertLess(
+            publisher.index("published.write_bytes(contents)"),
+            publisher.index("mark_published("),
+        )
+        self.assertEqual(
+            {
+                "staging_mount": "/runtime/reports/staging",
+                "published_mount": "/runtime/reports/published",
+            },
+            config,
+        )
+        expectations = json.loads(
+            (case.directory / "expectations.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [["T2", "T1"], ["T3", "T1"], ["T3", "T2"]],
+            expectations["task_graph"]["required_edges"],
+        )
+        self.assertTrue(expectations["task_graph"]["require_acyclic"])
+
+    def test_novel_material_assumption_proof_case_is_not_scripted(self):
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+        case = next(
+            case
+            for case in report.cases
+            if case.id == "to-plan-material-assumption-proof-novel"
+        )
+        self.assertEqual("novel", case.kind)
+        self.assertTrue(case.calibration)
+        self.assertEqual("workflow-report-publication", case.fixture)
+        self.assertIn("configured staging mount", case.prompt)
+        self.assertIn("configured published mount", case.prompt)
+        self.assertNotIn("proof", case.prompt.lower())
+        self.assertNotIn("os.replace", case.prompt)
+        self.assertNotIn("T3", case.prompt)
+        rubric_ids = {item["id"] for item in case.rubric}
+        self.assertTrue(
+            {
+                "repository-evidence",
+                "bounded-proof",
+                "failure-gate",
+                "task-dependency",
+                "proposed-publication",
+            }
+            <= rubric_ids
+        )
+        expectations = json.loads(
+            (case.directory / "expectations.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [["T2", "T1"]],
+            expectations["task_graph"]["required_edges"],
+        )
+        self.assertTrue(expectations["task_graph"]["require_acyclic"])
+
+    def test_evidence_backed_plan_counterexample_rejects_speculative_proof(self):
+        report = validate_corpus(REPO_ROOT, suite="workflows-writing")
+        case = next(
+            case for case in report.cases if case.id == "to-plan-authorized-draft-direct"
+        )
+        self.assertTrue(case.calibration)
+        rubric = {item["id"]: item["text"] for item in case.rubric}
+        self.assertIn("one implementation slice", rubric["proportionality"])
+        self.assertIn("without a speculative proof task", rubric["proportionality"])
+
+    def test_task_graph_validator_ignores_fenced_markdown_headings_and_fields(self):
+        subject = (
+            "```markdown\n"
+            "## Implementation slices\n"
+            "### 1. Example only\n"
+            "**Task ID:** `FAKE`\n"
+            "**Depends on:** `MISSING`\n"
+            "```\n"
+            "## Implementation slices\n\n"
+            "### 1. Actual task\n"
+            "**Task ID:** `T1`\n"
+            "**Depends on:** `none`\n\n"
+            "```md\n"
+            "### 2. Fenced example, not a slice\n"
+            "**Task ID:** `FAKE2`\n"
+            "**Depends on:** `T1`\n"
+            "```\n"
+            "## Acceptance coverage\n"
+        )
+
+        failures = validate_task_graph(
+            subject, {"required_edges": [], "require_acyclic": True}
+        )
+
+        self.assertEqual([], failures)
+
+    def test_task_graph_validator_rejects_unnumbered_slice_before_valid_slice(self):
+        subject = (
+            "## Implementation slices\n\n"
+            "### Unnumbered but declared slice\n"
+            "**Task ID:** `T0`\n"
+            "**Depends on:** `none`\n\n"
+            "### 1. Numbered slice\n"
+            "**Task ID:** `T1`\n"
+            "**Depends on:** `none`\n"
+        )
+
+        failures = validate_task_graph(
+            subject, {"required_edges": [], "require_acyclic": True}
+        )
+
+        self.assertTrue(
+            any("malformed implementation slice heading" in failure for failure in failures),
+            failures,
+        )
+
+    def test_task_graph_validator_rejects_slice_at_unexpected_heading_level(self):
+        subject = (
+            "## Implementation slices\n\n"
+            "### 1. Numbered slice\n"
+            "**Task ID:** `T1`\n"
+            "**Depends on:** `none`\n\n"
+            "#### 2. Hidden deeper slice\n"
+            "**Task ID:** `T2`\n"
+            "**Depends on:** `T1`\n"
+        )
+
+        failures = validate_task_graph(
+            subject, {"required_edges": [], "require_acyclic": True}
+        )
+
+        self.assertTrue(
+            any("unexpected heading level" in failure for failure in failures), failures
+        )
+
+    def test_task_graph_validator_rejects_slice_that_ends_its_section(self):
+        subject = (
+            "## Implementation slices\n\n"
+            "### 1. Numbered slice\n"
+            "**Task ID:** `T1`\n"
+            "**Depends on:** `none`\n\n"
+            "## Unnumbered slice\n"
+            "**Task ID:** `T2`\n"
+            "**Depends on:** `T1`\n"
+        )
+
+        failures = validate_task_graph(
+            subject, {"required_edges": [], "require_acyclic": True}
+        )
+
+        self.assertTrue(
+            any("unexpected section boundary" in failure for failure in failures), failures
+        )
+
+    def test_task_graph_validator_reserves_none_as_dependency_sentinel(self):
+        subject = (
+            "## Implementation slices\n\n"
+            "### 1. A task named none\n"
+            "**Task ID:** `NONE`\n"
+            "**Depends on:** `none`\n"
+        )
+
+        failures = validate_task_graph(
+            subject, {"required_edges": [], "require_acyclic": True}
+        )
+
+        self.assertTrue(any("task ID 'none' is reserved" in failure for failure in failures))
+
+    def test_preparation_admission_decisions_and_unsafe_variants(self):
+        reports = {
+            "run-github-project-preparation-direct": {
+                "Preparation": "admit-F1",
+                "Owner": "fallback",
+                "Paths": "fixtures/fallback.json, tests/test_fallback_fixture.py",
+                "Check": "python3 -m unittest tests.test_fallback_fixture",
+                "Stop": "before-F2-and-render/Glass.kt",
+                "GPU1": "retained-by-optics",
+                "Qualification": "pending-integrated-head",
+                "Native-variant": "hold-whole-ticket",
+                "Plan": "preserve",
+            },
+            "deliver-spec-behavioral-dependency-novel": {
+                "E1": "hold",
+                "Evidence": "integrated-S1-and-affected-checks",
+                "Base": "current-integrated-head",
+                "Graph": "preserve-S1-to-E1",
+                "All-work-variant": "hold-for-authorized-plan-change",
+                "Qualification": "pending-integrated-head",
+            },
+            "run-github-project-shared-seam-negative": {
+                "Admission": "hold-whole-ticket",
+                "Independence": "unknown",
+                "Next-shared-edit": "stop",
+                "Ownership": "preserve-fallback-at-C0",
+                "Resume": "established-independence-or-authorized-plan-change",
+                "Qualification": "pending-integrated-head",
+            },
+        }
+        cases = {case.id: case for case in validate_corpus(REPO_ROOT, suite="workflows-writing").cases}
+        validator = REPO_ROOT / "evals/validators/text_case.py"
+        for case_id, fields in reports.items():
+            case = cases[case_id]
+            self.assertTrue(case.calibration)
+            self.assertEqual((".scratch/admission.md",), case.allowed_write_paths)
+            with tempfile.TemporaryDirectory() as directory:
+                workspace = Path(directory)
+                (workspace / "state.md").write_bytes(
+                    (REPO_ROOT / "evals/fixtures/workflow/state.md").read_bytes()
+                )
+                artifact = workspace / ".scratch/admission.md"
+                artifact.parent.mkdir()
+
+                def check(values):
+                    artifact.write_text(
+                        "\n".join(f"{key}: {value}" for key, value in values.items()) + "\n",
+                        encoding="utf-8",
+                    )
+                    return subprocess.run(
+                        [sys.executable, "-B", str(validator), case_id],
+                        cwd=workspace, text=True, capture_output=True, check=False,
+                    )
+
+                with self.subTest(case=case_id, variant="accepted"):
+                    result = check(fields)
+                    self.assertEqual(0, result.returncode, result.stderr)
+                # Reject missing boundaries/ownership and every changed admission gate.
+                for key in fields:
+                    with self.subTest(case=case_id, missing=key):
+                        result = check({name: value for name, value in fields.items() if name != key})
+                        self.assertEqual(1, result.returncode, result.stderr)
+                unsafe = {
+                    "Preparation": "hold", "Owner": "unassigned",
+                    "Paths": "render/Glass.kt", "Check": "final-only",
+                    "Stop": "after-shared-edit", "GPU1": "released",
+                    "Qualification": "complete", "Native-variant": "admit-F1",
+                    "Plan": "silently-reorder", "E1": "dispatch",
+                    "Evidence": "S1-branch-tests", "Base": "unmerged-S1-branch",
+                    "Graph": "remove-edge", "All-work-variant": "invent-preparation",
+                    "Admission": "admit-preparation", "Independence": "proven-by-worktree",
+                    "Next-shared-edit": "finish-slice", "Ownership": "transfer-to-controller",
+                    "Resume": "free-file-grant",
+                }
+                for key in fields:
+                    with self.subTest(case=case_id, changed=key):
+                        result = check({**fields, key: unsafe[key]})
+                        self.assertEqual(1, result.returncode, result.stderr)
+                    with self.subTest(case=case_id, contradictory=key):
+                        result = check({**fields, key: f"{fields[key]}\n{key}: {unsafe[key]}"})
+                        self.assertEqual(1, result.returncode, result.stderr)
+
+    def test_nested_agent_and_payload_digest_decisions_reject_unsafe_variants(self):
+        reports = {
+            "deliver-spec-nested-reviewer-direct": {
+                "Reviewer-launch": "foreground", "Wait": "same-turn",
+                "Return": "after-verdict", "Push": "after-ship-verdict",
+            },
+            "deliver-spec-nested-helpers-novel": {
+                "Helpers": "foreground-one-message",
+                "Slice-workers": "foreground-one-message",
+                "Return": "after-integration-and-review",
+            },
+            "run-github-project-background-owners-negative": {
+                "Ticket-owners": "background", "Evidence-helper": "background",
+                "Wait": "completion-notification",
+            },
+            "to-plan-payload-digest-direct": {
+                "Digest": "e3367715a0ad1c0c4bded77bd84faa38d190f61fcee5dfd363e6a378eb87a7e5",
+                "Readback": "verified",
+            },
+            "run-github-project-payload-digest-novel": {
+                "Predecessor-digest": "89df8f37baba51e5e05779123c66c6fcd5a7a16e802405eb90cdd78adc64e22d",
+                "Replan-report": "matches",
+            },
+            "to-plan-payload-digest-restraint-negative": {
+                "Digest": "b07d38664b960a4fa516ea8881abfa876dc3800ba06024f20c93f088b1b508db",
+                "Publication": "no-op", "Write": "none",
+            },
+        }
+        # Each unsafe value is the decision or digest the observed failure produces.
+        unsafe = {
+            "deliver-spec-nested-reviewer-direct": {
+                "Reviewer-launch": "background", "Wait": "completion-notification",
+                "Return": "pending-review", "Push": "before-review",
+            },
+            "deliver-spec-nested-helpers-novel": {
+                "Helpers": "background", "Slice-workers": "background",
+                "Return": "pending-workers",
+            },
+            "run-github-project-background-owners-negative": {
+                "Ticket-owners": "foreground", "Evidence-helper": "foreground", "Wait": "poll",
+            },
+            "to-plan-payload-digest-direct": {
+                "Digest": "42c657ca3e56807cf8972dfdf006dec7777155a0564f132be776c6d3a138b8c7",
+                "Readback": "mismatch",
+            },
+            "run-github-project-payload-digest-novel": {
+                "Predecessor-digest": "103dae42f31ef781fbad9a7d90e4cfa61df40570015331723b84a0c89e425c3f",
+                "Replan-report": "mismatched",
+            },
+            "to-plan-payload-digest-restraint-negative": {
+                "Digest": "3588a82491c459569f43cffa357293d49632572393c1f8f7b0ee828495e2e725",
+                "Publication": "new-revision", "Write": "create-comment",
+            },
+        }
+        cases = {case.id: case for case in validate_corpus(REPO_ROOT, suite="workflows-writing").cases}
+        validator = REPO_ROOT / "evals/validators/text_case.py"
+        for case_id, fields in reports.items():
+            case = cases[case_id]
+            self.assertTrue(case.calibration)
+            (artifact_path,) = case.allowed_write_paths
+            with tempfile.TemporaryDirectory() as directory:
+                workspace = Path(directory)
+                (workspace / "state.md").write_bytes(
+                    (REPO_ROOT / "evals/fixtures/workflow/state.md").read_bytes()
+                )
+                artifact = workspace / artifact_path
+                artifact.parent.mkdir()
+
+                def check(values):
+                    artifact.write_text(
+                        "\n".join(f"{key}: {value}" for key, value in values.items()) + "\n",
+                        encoding="utf-8",
+                    )
+                    return subprocess.run(
+                        [sys.executable, "-B", str(validator), case_id],
+                        cwd=workspace, text=True, capture_output=True, check=False,
+                    )
+
+                with self.subTest(case=case_id, variant="accepted"):
+                    result = check(fields)
+                    self.assertEqual(0, result.returncode, result.stderr)
+                for key in fields:
+                    with self.subTest(case=case_id, missing=key):
+                        result = check({name: value for name, value in fields.items() if name != key})
+                        self.assertEqual(1, result.returncode, result.stderr)
+                    with self.subTest(case=case_id, changed=key):
+                        result = check({**fields, key: unsafe[case_id][key]})
+                        self.assertEqual(1, result.returncode, result.stderr)
+                    with self.subTest(case=case_id, contradictory=key):
+                        result = check({**fields, key: f"{fields[key]}\n{key}: {unsafe[case_id][key]}"})
+                        self.assertEqual(1, result.returncode, result.stderr)
+
+    def test_plan_artifact_validator_rejects_cyclic_task_dependencies(self):
+        validator = REPO_ROOT / "evals/validators/text_case.py"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            draft = workspace / ".scratch/to-plan/cyclic-plan.md"
+            draft.parent.mkdir(parents=True)
+            draft.write_text(plan_artifact(dependency="T1"), encoding="utf-8")
+
+            completed = subprocess.run(
+                ["python3", str(validator), "to-plan-authorized-draft-direct"],
+                cwd=workspace,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(1, completed.returncode)
+        self.assertIn("task dependency graph contains a cycle", completed.stderr)
+
+    def test_plan_artifact_validator_rejects_multiple_local_drafts(self):
+        validator = REPO_ROOT / "evals/validators/text_case.py"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            drafts = workspace / ".scratch/to-plan"
+            drafts.mkdir(parents=True)
+            for name in ("first.md", "second.md"):
+                (drafts / name).write_text("placeholder\n", encoding="utf-8")
+
+            completed = subprocess.run(
+                ["python3", str(validator), "to-plan-authorized-draft-direct"],
+                cwd=workspace,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(1, completed.returncode)
+        self.assertIn("expected 1 files, found 2", completed.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

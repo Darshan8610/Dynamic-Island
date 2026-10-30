@@ -1,0 +1,41 @@
+{
+  "id": "compose-ui-testing-patterns-direct",
+  "title": "Update a baseline for an intentional screenshot configuration change",
+  "family": "testing",
+  "target_skills": [
+    "compose-ui-testing-patterns"
+  ],
+  "expected_skills": [
+    "compose-ui-testing-patterns"
+  ],
+  "task_mode": "edit",
+  "kind": "direct",
+  "fixture": "compose-jvm",
+  "allowed_write_paths": [
+    "src/test/kotlin/example/SubjectTest.kt",
+    "src/test/resources/baselines/Subject.txt"
+  ],
+  "validators": [
+    {
+      "argv": [
+        "python3",
+        "@validators/compose_case.py",
+        "compose-ui-testing-patterns-direct"
+      ],
+      "timeout_seconds": 30
+    }
+  ],
+  "rubric": [
+    {
+      "id": "criterion-1",
+      "text": "Keeps the test on the named public configuration and updates the affected baseline"
+    },
+    {
+      "id": "criterion-2",
+      "text": "Preserves the existing tolerance rather than weakening the visual assertion"
+    }
+  ],
+  "provenance": {
+    "kind": "synthetic"
+  }
+}

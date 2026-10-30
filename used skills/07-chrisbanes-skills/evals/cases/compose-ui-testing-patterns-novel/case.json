@@ -1,0 +1,42 @@
+{
+  "id": "compose-ui-testing-patterns-novel",
+  "title": "Review screenshot baseline recording evidence",
+  "family": "testing",
+  "target_skills": [
+    "compose-ui-testing-patterns"
+  ],
+  "expected_skills": [
+    "compose-ui-testing-patterns"
+  ],
+  "task_mode": "review",
+  "kind": "novel",
+  "fixture": "compose-jvm",
+  "allowed_write_paths": [],
+  "validators": [
+    {
+      "argv": [
+        "python3",
+        "@validators/compose_case.py",
+        "compose-ui-testing-patterns-novel"
+      ],
+      "timeout_seconds": 30
+    }
+  ],
+  "rubric": [
+    {
+      "id": "criterion-1",
+      "text": "Distinguishes a passing verification result from evidence that recording wrote the expected artifact path"
+    },
+    {
+      "id": "criterion-2",
+      "text": "Notes that `build/recorded/subject.png` is absent and no baseline diff was found, so the claimed baseline update is not evidenced; gives findings only and preserves the existing tolerance"
+    }
+  ],
+  "provenance": {
+    "kind": "historical",
+    "source_url": "https://github.com/takahirom/roborazzi/blob/56f6987180b28a10c8fe79dfd524c3f0d9c633d0/README.md",
+    "revision": "56f6987180b28a10c8fe79dfd524c3f0d9c633d0",
+    "license": "Apache-2.0",
+    "normalization_note": "Reduced and generalized the documented record, compare, and verify workflow to test that verification does not prove a baseline was recorded."
+  }
+}

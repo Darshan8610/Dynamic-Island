@@ -1,0 +1,19 @@
+{
+  "id": "android-benchmark-comparison-negative",
+  "title": "Do not turn a code-style request into a benchmark experiment",
+  "family": "benchmarking",
+  "target_skills": ["android-benchmark-comparison"],
+  "expected_skills": ["android-benchmark-comparison"],
+  "automatic_no_skill_control": true,
+  "task_mode": "edit",
+  "kind": "negative",
+  "fixture": "text",
+  "forbid_all_commands": true,
+  "allowed_write_paths": [],
+  "validators": [{"argv": ["python3", "@validators/text_case.py", "android-benchmark-comparison-negative"], "timeout_seconds": 30}],
+  "rubric": [
+    {"id": "restraint", "text": "The response determines that the supplied draft already fits 80 columns and leaves its words and meaning unchanged."},
+    {"id": "no-benchmarking", "text": "The response does not run, design, or demand a performance experiment for the formatting-only request."}
+  ],
+  "provenance": {"kind": "synthetic"}
+}

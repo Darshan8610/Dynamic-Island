@@ -17,6 +17,10 @@ import com.dynamicisland.engine.core.model.IslandState
 import com.dynamicisland.engine.core.model.IslandSymbol
 import com.dynamicisland.engine.core.model.PriorityRank
 import com.dynamicisland.engine.core.model.TransientAlert
+import com.dynamicisland.core.activity.ActivityLifecyclePolicy
+import com.dynamicisland.core.geometry.InteractionMode
+import com.dynamicisland.engine.ingestion.media.AlbumArtResolver
+import com.dynamicisland.engine.ingestion.notifications.LiveUpdateProgressParser
 import com.dynamicisland.engine.util.PendingIntentCompat
 import com.dynamicisland.engine.settings.BehaviorOptions
 import kotlinx.coroutines.CoroutineScope
@@ -48,7 +52,8 @@ class IslandPriorityArbiter(
     private val scope: CoroutineScope,
     private val context: Context? = null,
     private val behavior: StateFlow<BehaviorOptions> = MutableStateFlow(BehaviorOptions()),
-    private val onDismissNotifications: (List<String>) -> Unit = {}
+    private val onDismissNotifications: (List<String>) -> Unit = {},
+    private val clockMillis: () -> Long = { System.currentTimeMillis() }
 ) {
     companion object {
         private const val MEDIA_ACTIVITY_ID = "activity_media_session"
@@ -110,6 +115,7 @@ class IslandPriorityArbiter(
 
     /** True while the user has the inbox open. */
     private var inboxOpen: Boolean = false
+    private var focusCycleOffset: Int = 0
 
     /** Launch handles for inbox entries, keyed by notification key. */
     private val pendingIntents = mutableMapOf<String, android.app.PendingIntent>()
@@ -286,7 +292,7 @@ class IslandPriorityArbiter(
                     expandedData = existing.expandedData.copy(
                         trailing = IslandSlotContent.Text("Paused", colorHex = "#8E8E93")
                     ),
-                    lastUpdatedAt = System.currentTimeMillis()
+                    lastUpdatedAt = clockMillis()
                 )
                 activeActivities[MEDIA_ACTIVITY_ID] = updated
             } else if (event.playbackState == android.media.session.PlaybackState.STATE_PAUSED || event.positionMs > 0) {
@@ -326,7 +332,7 @@ class IslandPriorityArbiter(
                 expandedData = existing.expandedData.copy(
                     trailing = IslandSlotContent.Text("Playing", colorHex = "#1DB954")
                 ),
-                lastUpdatedAt = System.currentTimeMillis()
+                lastUpdatedAt = clockMillis()
             )
         } else {
             // Either no card yet, or a newly-playing session taking the card
@@ -390,8 +396,10 @@ class IslandPriorityArbiter(
             deepLinkIntent = event.launchIntent ?: existing.deepLinkIntent,
             compactLeading = leadingSlot,
             minimalContent = leadingSlot,
-            expandedData = expanded,
-            lastUpdatedAt = System.currentTimeMillis()
+            expandedData = expanded.copy(lyricLine = event.lyricLine, audioRouteLabel = event.audioRouteLabel),
+            keylineTintHex = event.dominantColorHex ?: AlbumArtResolver.extractDominantVibrantHex(event.albumArtBitmap),
+            relevanceScore = if (isMediaPlaying) 0.75f else 0.45f,
+            lastUpdatedAt = clockMillis()
         ) ?: IslandActivity(
             id = MEDIA_ACTIVITY_ID,
             ownerPackage = event.packageName,
@@ -401,9 +409,14 @@ class IslandPriorityArbiter(
             kind = ActivityKind.MEDIA_SESSION,
             rank = PriorityRank.MEDIA_PLAYBACK,
             compactLeading = leadingSlot,
-            compactTrailing = IslandSlotContent.AudioWaveform(emptyList(), tintHex = "#FFFFFF"),
+            compactTrailing = IslandSlotContent.AudioWaveform(
+                emptyList(),
+                tintHex = event.dominantColorHex ?: AlbumArtResolver.extractDominantVibrantHex(event.albumArtBitmap)
+            ),
             minimalContent = leadingSlot,
-            expandedData = expanded
+            expandedData = expanded.copy(lyricLine = event.lyricLine, audioRouteLabel = event.audioRouteLabel),
+            keylineTintHex = event.dominantColorHex ?: AlbumArtResolver.extractDominantVibrantHex(event.albumArtBitmap),
+            relevanceScore = if (isMediaPlaying) 0.75f else 0.45f
         )
 
         activeActivities[MEDIA_ACTIVITY_ID] = activity
@@ -414,8 +427,9 @@ class IslandPriorityArbiter(
         // must not overwrite the pause glyph after playback stops.
         if (!isMediaPlaying) return
         val existing = activeActivities[MEDIA_ACTIVITY_ID] ?: return
+        val tint = existing.keylineTintHex ?: "#1DB954"
         activeActivities[MEDIA_ACTIVITY_ID] = existing.copy(
-            compactTrailing = IslandSlotContent.AudioWaveform(event.amplitudes)
+            compactTrailing = IslandSlotContent.AudioWaveform(event.amplitudes, tintHex = tint)
         )
     }
 
@@ -503,7 +517,7 @@ class IslandPriorityArbiter(
                     ?.baseTimeMillis ?: existingCall?.startedAt
                 val durationSlot = IslandSlotContent.Chronometer(
                     baseTimeMillis = existingBase
-                        ?: (System.currentTimeMillis() - (event.durationSeconds * 1000L)),
+                        ?: (clockMillis() - (event.durationSeconds * 1000L)),
                     colorHex = "#30D158"
                 )
 
@@ -558,7 +572,7 @@ class IslandPriorityArbiter(
         // from a ticker that restarted at zero made the call timer jump backwards
         // on every re-established call.
         activeActivities[activityId] = existing.copy(
-            lastUpdatedAt = System.currentTimeMillis()
+            lastUpdatedAt = clockMillis()
         )
     }
 
@@ -612,13 +626,36 @@ class IslandPriorityArbiter(
             return
         }
 
+        val estimatedBytes = ActivityLifecyclePolicy.estimatePayloadBytes(
+            title = event.title,
+            subtitle = event.text,
+            subText = event.subText,
+            actionTitles = event.actions.map { it.title }
+        )
+        if (estimatedBytes > ActivityLifecyclePolicy.MAX_PAYLOAD_BYTES) return
+
+        val parsedLiveUpdate = LiveUpdateProgressParser.classifyAndParse(
+            packageName = event.packageName,
+            category = event.category,
+            title = event.title,
+            text = event.text,
+            subText = event.subText,
+            progressCurrent = event.progressCurrent,
+            progressMax = event.progressMax,
+            isIndeterminate = event.isProgressIndeterminate,
+            showChronometer = event.showChronometer,
+            isCountDown = event.isChronometerCountDown,
+            isProgressStyle = event.isProgressStyle
+        )
+
         // Live Ongoing Activity: categorize by rank
         val (rank, kind) = when {
             event.category == "call" -> PriorityRank.EMERGENCY_OR_CALL to ActivityKind.LIVE_CALL
             event.category == "alarm" -> PriorityRank.LIVE_TIMER_STOPWATCH to ActivityKind.LIVE_TIMER
             event.category == "stopwatch" -> PriorityRank.LIVE_TIMER_STOPWATCH to ActivityKind.LIVE_STOPWATCH
-            event.category == "navigation" -> PriorityRank.NAVIGATION_TURN_BY_TURN to ActivityKind.NAVIGATION
             event.category == "workout" -> PriorityRank.LIVE_TIMER_STOPWATCH to ActivityKind.LIVE_STOPWATCH
+            parsedLiveUpdate != null -> parsedLiveUpdate.rank to parsedLiveUpdate.kind
+            event.category == "navigation" -> PriorityRank.NAVIGATION_TURN_BY_TURN to ActivityKind.NAVIGATION
             else -> {
                 val isClockOrTimerPackage = event.packageName.contains("clock", ignoreCase = true) ||
                         event.packageName.contains("timer", ignoreCase = true) ||
@@ -626,7 +663,6 @@ class IslandPriorityArbiter(
                 val isNavPackage = event.packageName.contains("maps", ignoreCase = true) ||
                         event.packageName.contains("navigation", ignoreCase = true) ||
                         event.packageName.contains("waze", ignoreCase = true)
-
                 if (isNavPackage) {
                     PriorityRank.NAVIGATION_TURN_BY_TURN to ActivityKind.NAVIGATION
                 } else if (event.showChronometer && isClockOrTimerPackage) {
@@ -673,12 +709,27 @@ class IslandPriorityArbiter(
 
         val (symbol, tint) = when (kind) {
             ActivityKind.LIVE_TIMER, ActivityKind.LIVE_STOPWATCH -> IslandSymbol.TIMER to "#FF9F0A"
-            ActivityKind.NAVIGATION -> IslandSymbol.NAVIGATION to "#0A84FF"
+            ActivityKind.NAVIGATION -> IslandSymbol.NAVIGATION to (parsedLiveUpdate?.keylineTintHex ?: "#0A84FF")
+            ActivityKind.LIVE_JOURNEY -> IslandSymbol.DELIVERY to (parsedLiveUpdate?.keylineTintHex ?: "#30D158")
+            ActivityKind.FILE_DOWNLOAD -> IslandSymbol.DOWNLOAD to (parsedLiveUpdate?.keylineTintHex ?: "#64D2FF")
             ActivityKind.LIVE_CALL, ActivityKind.RINGING_CALL, ActivityKind.EMERGENCY_CALL -> IslandSymbol.PHONE to "#30D158"
             else -> IslandSymbol.BELL to "#FFFFFF"
         }
 
+        val progressFraction = if (event.progressCurrent != null && event.progressMax != null && event.progressMax > 0) {
+            (event.progressCurrent.toFloat() / event.progressMax.toFloat()).coerceIn(0f, 1f)
+        } else null
+
+        val minimalSlot: IslandSlotContent = when {
+            kind == ActivityKind.FILE_DOWNLOAD && event.progressMax != null && event.progressMax > 0 ->
+                IslandSlotContent.Progress(event.progressCurrent ?: 0, event.progressMax, event.isProgressIndeterminate, tintHex = tint)
+            (kind == ActivityKind.LIVE_TIMER || kind == ActivityKind.LIVE_STOPWATCH) && event.showChronometer && event.chronometerBase != null ->
+                IslandSlotContent.Chronometer(event.chronometerBase, event.isChronometerCountDown, colorHex = tint)
+            else -> IslandSlotContent.Symbol(symbol, tintHex = tint)
+        }
+
         val existing = activeActivities[event.key]
+        val nowMs = clockMillis()
         val activity = IslandActivity(
             id = event.key,
             ownerPackage = event.packageName,
@@ -686,22 +737,46 @@ class IslandPriorityArbiter(
             subtitle = event.text,
             kind = kind,
             rank = rank,
-            startedAt = existing?.startedAt ?: System.currentTimeMillis(),
+            startedAt = existing?.startedAt ?: nowMs,
+            lastUpdatedAt = nowMs,
             compactLeading = IslandSlotContent.Symbol(symbol, tintHex = tint),
             compactTrailing = trailingSlot,
-            minimalContent = IslandSlotContent.Symbol(symbol, tintHex = tint),
+            minimalContent = minimalSlot,
             expandedData = ExpandedRegionData(
                 leading = IslandSlotContent.Symbol(symbol, tintHex = tint),
                 trailing = trailingSlot,
                 center = IslandSlotContent.Text(event.title),
                 bottom = event.text?.let { IslandSlotContent.Text(it) },
-                actions = event.actions
+                actions = event.actions,
+                progressFraction = progressFraction,
+                progressLabel = parsedLiveUpdate?.compactTrailingBadge ?: event.subText,
+                milestones = parsedLiveUpdate?.milestones ?: emptyList(),
+                currentMilestoneIndex = parsedLiveUpdate?.currentMilestoneIndex ?: 0,
+                etaLabel = parsedLiveUpdate?.etaLabel ?: event.subText
             ),
             deepLinkIntent = event.contentIntent,
-            actions = event.actions
+            actions = event.actions,
+            relevanceScore = if (event.relevanceScore > 0f) event.relevanceScore else (parsedLiveUpdate?.relevanceScore ?: 0.5f),
+            interruptBoost = parsedLiveUpdate?.interruptBoost ?: 0,
+            staleAtMillis = event.staleAtMillis,
+            keylineTintHex = tint,
+            payloadBytes = estimatedBytes
         )
-
         activeActivities[event.key] = activity
+
+        if (parsedLiveUpdate?.shouldAutoExpandAlert == true && event.shouldAlert && behavior.value.systemAlertsEnabled) {
+            val alert = TransientAlert(
+                id = "${event.key}_live_update",
+                title = event.title,
+                message = event.text,
+                leadingSlot = IslandSlotContent.Symbol(symbol, tintHex = tint),
+                trailingSlot = parsedLiveUpdate.etaLabel?.let { IslandSlotContent.Text(it, colorHex = tint) } ?: trailingSlot,
+                durationMillis = 2400L,
+                rank = rank,
+                deepLinkIntent = event.contentIntent
+            )
+            triggerAlertPeek(alert)
+        }
 
         // An emergency or call notification cancels any lower-priority alert peeks
         if (rank == PriorityRank.EMERGENCY_OR_CALL) {
@@ -743,7 +818,7 @@ class IslandPriorityArbiter(
 
         alertPeekJob?.cancel()
         activeAlertPeek = alert
-        activeAlertPeekStartedAt = System.currentTimeMillis()
+        activeAlertPeekStartedAt = clockMillis()
 
         alertPeekJob = scope.launch {
             delay(alert.durationMillis)
@@ -773,7 +848,7 @@ class IslandPriorityArbiter(
                 packageName = event.packageName,
                 title = if (behavior.value.hideNotificationText) (event.appLabel ?: event.packageName) else event.title,
                 body = if (behavior.value.hideNotificationText) null else event.text,
-                postedAtMillis = event.postedAtMillis ?: System.currentTimeMillis(),
+                postedAtMillis = event.postedAtMillis ?: clockMillis(),
                 isOngoing = event.isOngoing,
                 appLabel = event.appLabel,
                 groupKey = event.groupKey, importance = event.importance
@@ -893,18 +968,21 @@ class IslandPriorityArbiter(
                         }
                         return@withLock
                     }
+                    val appleParity = behavior.value.interactionMode == InteractionMode.APPLE_PARITY
                     when (current) {
-                        // A tap on the pill opens the island rather than launching
-                        // the app. This is the gesture users reach for first — it
-                        // is what iOS does — and the previous mapping sent a tap
-                        // straight into the app, which made the island feel like a
-                        // notification rather than something you can open. The
-                        // launch now lives on the hold.
                         is IslandState.Compact -> {
-                            expandedActivityId = current.activity.id
+                            if (appleParity) {
+                                intentToTrigger = current.activity.deepLinkIntent
+                            } else {
+                                expandedActivityId = current.activity.id
+                            }
                         }
                         is IslandState.Minimal -> {
-                            expandedActivityId = current.primary.id
+                            if (appleParity) {
+                                intentToTrigger = current.primary.deepLinkIntent
+                            } else {
+                                expandedActivityId = current.primary.id
+                            }
                         }
                         is IslandState.AlertPeek -> {
                             alertPeekJob?.cancel()
@@ -919,8 +997,6 @@ class IslandPriorityArbiter(
                                 else -> Unit
                             }
                         }
-                        // A tap anywhere on the open card closes it, so the same
-                        // gesture both opens and closes.
                         is IslandState.Expanded -> {
                             expandedActivityId = null
                         }
@@ -929,18 +1005,32 @@ class IslandPriorityArbiter(
                 }
                 is IslandUserCommand.TapSecondary -> {
                     val current = _islandState.value
+                    val appleParity = behavior.value.interactionMode == InteractionMode.APPLE_PARITY
                     if (current is IslandState.Minimal && current.primary.rank != PriorityRank.EMERGENCY_OR_CALL) {
-                        expandedActivityId = current.secondary.id
-                        // A deliberate secondary selection may coexist with the activity
-                        // already ahead of it. A newly higher priority event still preempts.
-                        expansionPriorityAtSelection = priorityOrder(current.primary)
+                        if (appleParity && current.secondary.deepLinkIntent != null) {
+                            intentToTrigger = current.secondary.deepLinkIntent
+                        } else {
+                            expandedActivityId = current.secondary.id
+                            expansionPriorityAtSelection = priorityOrder(current.primary)
+                        }
+                    }
+                }
+                is IslandUserCommand.TapTertiary -> {
+                    val current = _islandState.value
+                    val appleParity = behavior.value.interactionMode == InteractionMode.APPLE_PARITY
+                    val tertiary = (current as? IslandState.Minimal)?.tertiary
+                    if (current is IslandState.Minimal && tertiary != null && current.primary.rank != PriorityRank.EMERGENCY_OR_CALL) {
+                        if (appleParity && tertiary.deepLinkIntent != null) {
+                            intentToTrigger = tertiary.deepLinkIntent
+                        } else {
+                            expandedActivityId = tertiary.id
+                            expansionPriorityAtSelection = priorityOrder(current.primary)
+                        }
                     }
                 }
                 is IslandUserCommand.LongPressPrimary -> {
                     val current = _islandState.value
-                    // A hold opens the app. On the expanded card the hold is the
-                    // only way out other than a tap, so it launches the activity
-                    // the card is showing.
+                    val appleParity = behavior.value.interactionMode == InteractionMode.APPLE_PARITY
                     val target = when (current) {
                         is IslandState.Compact -> current.activity
                         is IslandState.Minimal -> current.primary
@@ -948,13 +1038,41 @@ class IslandPriorityArbiter(
                         else -> null
                     }
                     if (target != null) {
-                        intentToTrigger = target.deepLinkIntent
+                        if (appleParity && current !is IslandState.Expanded) {
+                            expandedActivityId = target.id
+                        } else {
+                            intentToTrigger = target.deepLinkIntent
+                        }
                     }
                 }
                 is IslandUserCommand.LongPressSecondary -> {
                     val current = _islandState.value
+                    val appleParity = behavior.value.interactionMode == InteractionMode.APPLE_PARITY
                     if (current is IslandState.Minimal) {
-                        intentToTrigger = current.secondary.deepLinkIntent
+                        if (appleParity && current.primary.rank != PriorityRank.EMERGENCY_OR_CALL) {
+                            expandedActivityId = current.secondary.id
+                            expansionPriorityAtSelection = priorityOrder(current.primary)
+                        } else {
+                            intentToTrigger = current.secondary.deepLinkIntent
+                        }
+                    }
+                }
+                is IslandUserCommand.LongPressTertiary -> {
+                    val current = _islandState.value
+                    val appleParity = behavior.value.interactionMode == InteractionMode.APPLE_PARITY
+                    val tertiary = (current as? IslandState.Minimal)?.tertiary
+                    if (current is IslandState.Minimal && tertiary != null) {
+                        if (appleParity && current.primary.rank != PriorityRank.EMERGENCY_OR_CALL) {
+                            expandedActivityId = tertiary.id
+                            expansionPriorityAtSelection = priorityOrder(current.primary)
+                        } else {
+                            intentToTrigger = tertiary.deepLinkIntent
+                        }
+                    }
+                }
+                is IslandUserCommand.CycleActivityFocus -> {
+                    if (activeActivities.size >= 2) {
+                        focusCycleOffset += if (command.direction == 0) 1 else command.direction
                     }
                 }
                 is IslandUserCommand.CollapseExpanded -> {
@@ -1014,18 +1132,56 @@ class IslandPriorityArbiter(
      */
     private fun priorityOrder(activity: IslandActivity): Int {
         if (activity.rank == PriorityRank.EMERGENCY_OR_CALL) return 100
-        return when {
+        val base = when {
             behavior.value.priority == com.dynamicisland.core.geometry.ActivityPriority.MEDIA_FIRST && activity.kind == ActivityKind.MEDIA_SESSION -> 150
             behavior.value.priority == com.dynamicisland.core.geometry.ActivityPriority.NAVIGATION_FIRST && activity.kind == ActivityKind.NAVIGATION -> 150
             else -> activity.rank.order
         }
+        val stalePenalty = if (activity.isStale) 250 else 0
+        return (base - activity.interruptBoost + stalePenalty).coerceAtLeast(101)
     }
 
     private fun recomputeIslandState() {
+        val nowMs = clockMillis()
+        val expiredIds = mutableListOf<String>()
+        for ((id, act) in activeActivities) {
+            val lifecycle = ActivityLifecyclePolicy.evaluate(
+                startedAtMillis = act.startedAt,
+                nowMillis = nowMs,
+                staleAtMillis = act.staleAtMillis,
+                endedAtMillis = act.endedAtMillis,
+                dismissalPolicy = act.dismissalPolicy,
+                payloadBytes = act.payloadBytes
+            )
+            if (lifecycle.shouldVacateIsland) {
+                expiredIds.add(id)
+            } else if (lifecycle.isStale != act.isStale) {
+                activeActivities[id] = act.copy(isStale = lifecycle.isStale)
+            }
+        }
+        expiredIds.forEach { removeActivity(it) }
+
+        notificationInbox.removeAll { entry ->
+            entry.endedAtMillis != null && (nowMs - entry.endedAtMillis) >= ActivityLifecyclePolicy.POST_END_RETENTION_MS
+        }
+
         _mediaActivity.value = if (isKeyguardLocked) null else activeActivities[MEDIA_ACTIVITY_ID]
         _notificationCount.value = if (isKeyguardLocked) 0 else notificationInbox.size
-        // Compute underlying base presentation state (without alert peek)
-        val sortedActivities = activeActivities.values.sortedWith(compareBy<IslandActivity> { priorityOrder(it) }.thenBy { it.startedAt }.thenBy { it.id })
+        val rawSorted = activeActivities.values.sortedWith(
+            compareBy<IslandActivity> { priorityOrder(it) }
+                .thenByDescending { it.relevanceScore }
+                .thenBy { it.startedAt }
+                .thenBy { it.id }
+        )
+        val sortedActivities = if (rawSorted.size >= 2 && focusCycleOffset != 0 && rawSorted.first().rank != PriorityRank.EMERGENCY_OR_CALL) {
+            val maxSlots = behavior.value.maxConcurrentActivities.coerceIn(2, 3).coerceAtMost(rawSorted.size)
+            val topPool = rawSorted.take(maxSlots)
+            val rest = rawSorted.drop(maxSlots)
+            val shift = ((focusCycleOffset % topPool.size) + topPool.size) % topPool.size
+            topPool.drop(shift) + topPool.take(shift) + rest
+        } else {
+            rawSorted
+        }
 
         val baseState: IslandState = when {
             sortedActivities.isEmpty() -> {
@@ -1079,11 +1235,12 @@ class IslandPriorityArbiter(
         return if (sortedActivities.size == 1) {
             IslandState.Compact(sortedActivities[0])
         } else {
-            // Multi-island management: Top 2 activities selected
+            val maxSlots = behavior.value.maxConcurrentActivities.coerceIn(2, 3)
             IslandState.Minimal(
                 primary = sortedActivities[0],
                 secondary = sortedActivities[1],
-                totalActiveActivitiesCount = sortedActivities.size
+                totalActiveActivitiesCount = sortedActivities.size,
+                tertiary = if (maxSlots >= 3) sortedActivities.getOrNull(2) else null
             )
         }
     }

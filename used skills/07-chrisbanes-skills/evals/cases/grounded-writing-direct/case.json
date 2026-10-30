@@ -1,0 +1,18 @@
+{
+  "id": "grounded-writing-direct",
+  "title": "Rewrite public quality-setting documentation",
+  "family": "writing",
+  "target_skills": ["grounded-writing"],
+  "expected_skills": ["grounded-writing"],
+  "task_mode": "edit",
+  "kind": "direct",
+  "fixture": "text",
+  "allowed_write_paths": ["draft.md"],
+  "validators": [{"argv": ["python3", "@validators/text_case.py", "grounded-writing-direct"], "timeout_seconds": 30}],
+  "rubric": [
+    {"id": "user-decision", "text": "The documentation explains the visible difference between quality settings and when to choose each one"},
+    {"id": "contract-and-limit", "text": "The documentation retains the public quality contract and meaningful limitation without inventing performance or visual claims"},
+    {"id": "implementation-boundary", "text": "The public documentation removes minimum-pixel interpolation, CPU-mask, and cooldown implementation detail because none is needed to use the API correctly"}
+  ],
+  "provenance": {"kind": "synthetic"}
+}

@@ -1,0 +1,264 @@
+# Upstream synchronization and local SQL maintenance
+
+Perfetto Skills is released and tested independently. SmartPerfetto and Google
+Perfetto are reviewed upstream inputs, not runtime dependencies. All supported
+upstream state is immutable, checksum-pinned, dry-run by default, and promoted
+only after project-owned real-trace verification.
+
+## Cross-repository impact decision
+
+Run the impact checker before committing or pushing. Its path classifier only
+answers whether review is needed; a maintainer or agent must supply the semantic
+decision.
+
+```bash
+base="$(git merge-base HEAD origin/main)"
+uv run python tools/check_cross_repo_impact.py \
+  --repository perfetto-skills --base "$base" \
+  --decision required --reason "paired runtime contract changed" \
+  --paired-path /absolute/path/to/SmartPerfetto \
+  --paired-ref "$(git -C /absolute/path/to/SmartPerfetto rev-parse HEAD)"
+```
+
+The public triggers are `catalog/`, runtime scripts and assets, generated
+references, `src/`, `upstreams/`, `fixtures/`, the SmartPerfetto exporter, and
+the local compiler. The decisions mean:
+
+- `required`: validate `--paired-path` and require `--paired-ref` to name both
+  an existing commit and the paired checkout's exact HEAD, change the paired
+  repository, and run both repositories' gates;
+- `not_required`: explain why the behavior or contract is local;
+- `deferred`: explain the split and provide a durable issue, commit, or PR
+handoff with `--handoff`.
+
+The default input is the union of merge-base-to-HEAD, staged, unstaged, and
+untracked paths. Record the emitted change fingerprint and paired evidence in
+commit or PR notes. If a required paired checkout/ref cannot be validated, use
+`deferred` with a stable shared issue/task URL.
+
+An overlay is a reviewed public-project divergence. Never copy it mechanically
+into SmartPerfetto. Re-express the behavior in SmartPerfetto's architecture,
+add its native tests, then regenerate the public projection if appropriate.
+
+## Synchronize SmartPerfetto Skills, Strategies, and SQL
+
+1. Pin the reviewed SmartPerfetto repository and 40-character commit in
+   `upstreams/smartperfetto.lock.json`.
+2. Run `uv run python tools/sync_smartperfetto.py --source PATH --report-dir
+   test-output/sync`. This imports into a temporary directory and reports
+   added, removed, and changed imported files plus catalog and policy drift
+   without mutation. Overlay conflicts are checked by the compiler after import.
+3. Inspect the report and update SmartPerfetto export policy at its source when
+   a product-owned Skill, Strategy, rendering-pipeline document, or SQL query is
+   missing.
+4. Apply an approved import with the same command plus `--apply`, then compile
+   local overlays with `uv run python tools/compile_skill.py --apply`. If a base
+   hash changed, review and rebase the affected overlay and its dependencies
+   before compiling; do not discard local changes to clear the conflict.
+5. Run `uv run python tools/verify.py --smartperfetto PATH`. This runs the
+   complete independent gate and pinned import/catalog checks together;
+   there is no need to run the unchanged independent suite a second time.
+   Record the cross-repository impact decision and paired commit when required.
+
+The portable executor evaluates step `condition`, iterator `filter`, Skill
+`params` whose whole value is one `${...}`, and diagnostic rule `condition`,
+`diagnosis` and `suggestions` with `runtime/expressions.py`. The exporter parses
+each of them with that same parser, so a construct outside the subset (ternary,
+direct calls other than `Boolean()`, unsupported methods or arguments, nested
+placeholders) fails the import instead of a public run. SmartPerfetto `AND`/`OR`
+in step conditions and filters are normalized first; one inside a string literal
+fails the import, because SmartPerfetto rewrites it there too. A rule
+`confidence` must be `high`, `medium`, `low` or a number: the executor raises when
+a rule with any other value fires (as it does for an unsupported template), so a
+hand-written or overlay Skill fails fast instead of publishing text.
+Fix a rejected template at its SmartPerfetto source, normally by computing the
+value in SQL; data-dependent failures such as strict placeholder arithmetic on a
+null value remain runtime errors.
+
+Only files marked `GENERATED FILE` or listed in the generated-base manifest are
+compiler output. The portable runtime under `scripts/` is native
+Perfetto-Skills source. Modify generated assets through the exporter, imported
+base, or an explicit local overlay; never hand-edit a generated file.
+
+Shared investigation profiles are imported as portable methodology. The exporter
+validates their versioned YAML schema and renders each requirement's description
+and applicability condition. It omits native producer metric bindings. Scene
+contracts refer to that shared document and contribute their own methodology;
+they do not install a product evidence ledger, assurance gate, or provider
+configuration. Unknown profile fields or unsupported schema versions fail the
+import and require an explicit exporter review. Product session history and turn
+completion prompts remain excluded by the source export policy.
+Scene imports also enforce the source schema's nonempty investigation and
+exclusive exemption rules. Normalize shared and local requirements before
+merging IDs: identical reuse is allowed, while differences in description,
+condition, domain, required status or native metric bindings fail the import.
+Metric bindings participate in this compatibility check but remain absent from
+the public methodology text. A condition is either `semantic` (a description)
+or `evidence`, which SmartPerfetto resolves from its producer ledger with
+`metric_id`, `operator` (`gt`/`gte`/`lt`/`lte`) and a finite numeric `value`.
+Only the description is rendered as "Apply when"; the ledger binding is kept
+for the same compatibility check and never published.
+
+## Synchronize the Google official Perfetto Skill
+
+The official Skill is a gap-check-only upstream. It is not a base package or a
+runtime dependency.
+
+1. Pin the canonical tag, peeled commit, and official Skill subtree in
+   `upstreams/google-perfetto.lock.json`.
+2. Run `uv run python tools/sync_official_skill.py --perfetto PATH --report-dir
+   test-output/sync`.
+3. Classify every current or removed file as `adopted`, `already_covered`,
+   `not_applicable`, or `pending_review`. The synchronizer applies only an
+   exact `(path, SHA-256)` decision; unchanged files do not inherit an outcome
+   from their directory. Record a non-pending result in
+   `upstreams/official-skill-decisions.json` with a concrete reason.
+   `adopted` and `already_covered` additionally require the implementing local
+   path, stable test id, and exact 40-character reviewed source commit.
+   `not_applicable` must explain the missing product/runtime boundary rather
+   than imply implementation. Unknown fields, malformed hashes, duplicate
+   decisions, and unresolved paths make pinned synchronization and `--apply`
+   fail.
+4. If adopted, implement it through this repository's normal source and tests,
+   then refresh the snapshot with `--apply`; the tool refreshes the lock's
+   complete snapshot hash before the complete gate runs.
+
+## Synchronize Android Skills profiler guidance
+
+`android/skills` is a second, independent gap-check-only upstream. It does not
+share a release identity with `google/perfetto` and cannot change the pinned
+trace processor or stdlib. Its repository content is read only from a
+disposable or maintainer-owned checkout during review; no Android Skill,
+reference, source inventory, or repository snapshot is stored here.
+
+1. Review only `profilers/perfetto-sql/**` and
+   `profilers/perfetto-trace-analysis/**`.
+2. Pin only the exact commit and both subtree tree IDs in
+   `upstreams/android-skills.lock.json`. Keep exact path/hash classifications
+   in the reviewed decision registry; do not copy upstream Markdown or
+   materialize an upstream snapshot.
+3. Run a dry review:
+
+   ```bash
+   uv run python tools/sync_android_skills.py \
+     --source /absolute/path/to/android-skills \
+     --revision <candidate-commit> \
+     --report-dir test-output/android-skills-review
+   ```
+
+4. Classify every exact changed path/hash in
+   `upstreams/android-skills-decisions.json`. `adopted` and
+   `already_covered` require a local path, test id, and immutable local source
+   commit. Unknown content remains `pending_review`.
+5. To promote a reviewed commit, make the pinned commit and candidate commit
+   available in the local source checkout, then run the same tool with
+   `--commit <commit> --apply`. It updates only the commit/tree lock and the
+   committed gap report when no unresolved decision remains. The source
+   checkout is never copied into this repository.
+6. Run `uv run python tools/verify.py`. The scheduled canary inventories
+   Android Skills `main` without applying it, so new behavior can fail the
+   non-blocking canary but cannot enter the package automatically.
+
+Do not import the upstream workspace downloader, trace-adjacent scratchpad, or
+repository-wide Android development Skills. Translate only portable
+methodology into repository-owned wording, architecture, and tests. Retain
+only the upstream identity, immutable Git pins, reviewed path/hash decisions,
+and the gap report needed to audit a claimed local coverage decision.
+
+## Synchronize the Perfetto runtime substrate
+
+The Google lock intentionally separates two identities. `official_reference`
+is the stable tagged release used only for the official Skill gap review.
+`runtime` is the exact source revision used by the shipped trace processor,
+PerfettoSQL stdlib, generated SQL indexes, and runtime compatibility checks.
+`runtime.reported_version` records what the binary prints; it is not a Git tag
+or a claim that the runtime revision descends from the official release tag.
+
+1. Verify the official tag and peeled commit independently. Then verify that
+   the runtime revision, RPC API, trace-processor v2 lock, and runtime stdlib
+   tree ID agree in `upstreams/google-perfetto.lock.json`. The binary cache key
+   must use the full runtime revision. When Google publishes release-addressed
+   artifacts instead of commit-addressed artifacts, the trace lock records a
+   separate `artifact_version`; all five platform paths use that locator while
+   source identity and cache isolation remain bound to the full revision.
+2. Run `uv run python tools/sync_perfetto_stdlib.py --perfetto PATH
+   --report-dir test-output/sync` to index modules, exported symbols, hashes,
+   documentation, and parse warnings through `git ls-tree` and `git show`.
+3. Resolve every removed/changed dependency and parse warning. Do not promote a
+   lock while an imported query references an unresolved module or symbol.
+4. Apply the reviewed runtime index with `--apply`; the tool refreshes only the
+   runtime stdlib snapshot hash in the Google lock. It must not update the
+   official Skill snapshot or its decisions. Bootstrap the locked processor, then run
+   `uv run python tools/validate_all_queries.py` plus the complete gate. The
+   scheduled canary additionally downloads the newest reviewed processor,
+   verifies its reported-version/revision/RPC identity, and executes owned real-trace semantic
+   assertions with the current Skill queries without promoting that processor.
+
+## Modify local SQL safely
+
+Local SQL replacements live under `src/overrides/sql/` with a descriptor that
+records the target, expected upstream SHA-256, replacement SHA-256, reason,
+owned-fixture regression IDs, and upstream-candidate state. Full replacement
+files make review and rebasing explicit.
+
+Overlay descriptors use the `*.overlay.json` suffix. Skill and Strategy
+overlays must list every dependent index/catalog replacement with both the
+expected upstream SHA-256 and replacement SHA-256; compilation stops if either
+the primary target or any dependent base changed.
+
+Use this red-green sequence:
+
+1. Add or identify a project-owned real-trace assertion that fails against the
+   recorded upstream base SQL; record its stable failure signature.
+2. Add the overlay descriptor and replacement. Run its focused regression and
+   confirm the base fails while the replacement passes.
+3. Run `uv run python tools/compile_skill.py --check` and
+   `uv run python tools/validate_all_queries.py`. Static validation parses SQL
+   after bounded Perfetto-template normalization and checks parameters,
+   fragments, setup/result dependencies, required symbols, hashes, and API
+   coverage. Every query also reports processor-compatibility, execution, and
+   semantic-verification axes; only the owned assertions executed by the full
+   gate count as current execution evidence.
+4. Run `uv run python tools/verify.py` with the checksum-verified fixture pack.
+5. Run the impact checker and update SmartPerfetto when the decision is
+   `required`.
+
+After any upstream sync, stale expected base hashes fail compilation instead of
+silently dropping or overwriting the local fix. Re-run the original regression,
+review whether the overlay is still needed, and either rebase it, remove it
+because upstream fixed the issue, or retain it with a new reviewed base hash.
+
+## Publish and consume project-owned fixtures
+
+Fixture packs are independent releases and are never rewritten. Before a new
+tag, run the v2 scanner over every manifest trace, review the private printable
+package/process inventory, and record the maintainer attestation without
+committing the identifier strings themselves:
+
+```bash
+uv run python tools/scan_fixture_privacy.py TRACE... \
+  --approve-identifiers REVIEWER --reviewed-at YYYY-MM-DD \
+  --output fixtures/privacy-scan-v2.json
+uv run python tools/build_fixture_pack.py \
+  --manifest fixtures/manifest.json --source-root FIXTURE_ROOT \
+  --output perfetto-skills-fixtures-v2.tar.gz
+```
+
+The deterministic archive builder rejects any trace set that is not covered
+exactly by the committed v2 privacy report or whose identifier review is not
+approved. It packages that report, `NOTICE`, and the AGPL/Apache license texts;
+the downloader verifies their lock-file hashes on every cache reuse. Commit the
+manifest, report, licenses, lock, and builder changes before creating the tag,
+then rebuild from that clean tagged commit and compare the archive SHA-256
+before publishing. A later pack uses a new version and release tag; never
+replace an existing asset.
+
+## Rollback
+
+Locks, imported SmartPerfetto bases, Google Perfetto indexes, reports, and
+fixture locks are ordinary versioned files. If promotion fails, abandon the
+uncommitted applied output or revert the synchronization commit, restore the
+previous immutable locks, clear only the local test cache, and rerun the prior
+complete gate. Android Skills remains gap-check-only and has no committed
+snapshot to restore. Never rewrite an existing fixture release asset or
+supported upstream tag.

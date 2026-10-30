@@ -1,0 +1,662 @@
+# Repository skill evaluations
+
+This directory contains a reproducible, advisory evaluator with a shared core
+and suite-specific catalogs, fixtures, coverage rules, and safety policies. It
+tests concrete scenarios modelled on real-world coding work, with expected
+outcomes, allowed-write boundaries, and no-change controls. The committed suites
+cover six Compose skills, four Kotlin/Gradle skills, and nine workflow/writing
+skills: `android-benchmark-comparison`, `deliver-spec`, `grounded-writing`,
+`implement-with-subagents`, `changelog`, `release-kotlin-library`,
+`run-github-project`,
+`shepherd`, and `to-plan`. It is designed to answer three separate questions:
+
+1. Does a skill improve the correctness and restraint of the resulting work?
+2. Does automatic activation report the expected implicitly invokable public skill entrypoints?
+3. What subject-side token, tool-call, and wall-clock cost does each arm require?
+
+The evaluator never turns a stochastic model score into a merge or release
+gate. CI validates only the harness, corpus, and deterministic formulas.
+
+Every scorecard includes non-gating, subject-only efficiency diagnostics by
+arm and by targeted skill. It reports total and median tokens, completed tool
+calls, completed turns, and elapsed time per run, including any retry,
+plus total work across all runs per successful
+outcome. The latter charges failed runs to the successful outcomes instead of
+making a fast failure look efficient. Token counts are input plus output
+tokens, and Claude Code input includes cache creation and cache reads; judge
+usage is kept in separate evaluator diagnostics because it
+measures evaluation overhead, not skill efficiency. Wall-clock results are
+environment-sensitive, so compare runs only when model, reasoning, machine,
+corpus, and execution conditions are held constant.
+
+The delivery calibration cases cover validation provenance/invalidation,
+retained integration work, reviewer packets, strict selected-provider
+invocation, and asynchronous or persistent qualification. The qualification
+cases require an offline harness for applicable capabilities before live
+qualification, using isolated production-store instances for persistent paths
+and a fake runtime for asynchronous paths. They cover missing actions, delayed
+or archived execution reconciliation, active execution assertion failures,
+persisted shutdown and recovery outcomes, no duplicate dispatch, bounded
+safe-stop handoff, unchanged allowances through routine repairs, and
+capability-specific restraint for async-only and synchronous-persistent jobs.
+They also distinguish implementation approval from standalone and Project
+GitHub plan publication/readback gates. Their deterministic validator checks
+immutable fixture integrity; semantic rubrics require a separately authorised
+model run and are not proven by corpus validation.
+
+The preparation-admission calibration cases additionally validate bounded
+decision artifacts for independent preparation, genuine behavioral dependencies
+and uncertain shared-seam overlap. Deterministic tests accept the expected
+decisions and reject widened scope or bypassed gates; they do not establish
+live model behavior or recoverable dependency-wait time.
+
+The writing calibration cases extend the rendering-documentation regressions
+with short review replies, nontechnical email (file edits and response-only
+drafting), missing personal experience,
+necessary tutorial mechanics, and ordinary assistant replies that should not
+activate the skill. Deterministic checks cover case validity, required content,
+forbidden claims, and file-write boundaries. Tone, reasoning, brevity, and actual
+routing behavior still require separately authorized model evaluations.
+
+## Results
+
+**Baseline** is the positive-case pass rate with no skills available, restricted
+to cases eligible for automatic activation. **Automatic** is the matching
+positive-case pass rate with every implicitly invokable repository skill
+available but none named in the prompt. Explicit-only skills are measured only
+in forced runs, including their no-change controls. **Restraint** is the
+no-change-control pass rate: the skill may inspect the task, but must not make
+an unnecessary change. The table reports the latest available result for each skill and
+correctness metric. These scores were produced using
+[`gpt-6-luna`](https://developers.openai.com/api/docs/models/gpt-6-luna)
+with high reasoning, judged by
+[`gpt-6-sol`](https://developers.openai.com/api/docs/models/gpt-6-sol) with
+high reasoning. Results are model- and reasoning-specific; other configurations
+may perform differently. The human audit queue remains open.
+
+The rows are descriptive diagnostics, not individual release gates. Multi-skill
+scenarios contribute to each relevant skill row, so the rows are not a
+suite-wide aggregate.
+
+| Skill | Baseline | Automatic | Restraint |
+| --- | ---: | ---: | ---: |
+| `compose-animations` | 75.0% | 100.0% | 100.0% |
+| `compose-component-design` | 86.7% | 100.0% | 100.0% |
+| `compose-focus-navigation` | 33.3% | 100.0% | 100.0% |
+| `compose-performance` | 83.3% | 100.0% | 100.0% |
+| `compose-state-and-effects` | 83.3% | 100.0% | 100.0% |
+| `compose-ui-testing-patterns` | 55.6% | 100.0% | 100.0% |
+| `gradle-run` | 41.7% | 100.0% | 100.0% |
+| `kotlin-api-design` | 58.3% | 100.0% | 100.0% |
+| `kotlin-concurrency-and-flow` | 44.4% | 100.0% | 100.0% |
+| `kotlin-control-flow` | 33.3% | 100.0% | 100.0% |
+| `android-benchmark-comparison` | 33.3% | 100.0% | 100.0% |
+| `deliver-spec` | — | — | — |
+| `grounded-writing` | 0.0% | 100.0% | 100.0% |
+| `implement-with-subagents` | — | — | 100.0% |
+| `release-kotlin-library` | 0.0% | 100.0% | 100.0% |
+| `run-github-project` | — | — | 100.0% |
+| `shepherd` | — | — | 100.0% |
+| `to-plan` | — | — | 100.0% |
+
+The `android-benchmark-comparison`, `compose-state-and-effects`,
+`compose-ui-testing-patterns`, `gradle-run`, `grounded-writing`, `kotlin-api-design`,
+`kotlin-concurrency-and-flow`, `kotlin-control-flow`, and
+`release-kotlin-library` automatic cells, and the `to-plan` restraint cell,
+use later focused evidence. Baseline and efficiency values use the complete
+suite. The [improvement result record](artifacts/2026-09-24-gpt6-improvement-results.md),
+[targeted probe record](artifacts/2026-09-24-gpt6-targeted-100-probes.md),
+and [inline repair record](artifacts/2026-09-24-gpt6-inline-repair-results.md)
+give provenance and remaining failures.
+
+### Skill efficiency
+
+Values are per-run medians, baseline → automatic, followed by the automatic
+percentage change. These subject-only measurements use the latest complete,
+same-run evidence available for each suite and include failed runs and negative
+controls. Baseline-to-automatic efficiency comparisons use only cases eligible
+for automatic activation. Multi-skill scenarios contribute to every targeted
+skill row. A turn is one completed top-level turn (a Codex `turn.completed` or a
+Claude Code `result`); time remains environment-sensitive.
+Run provenance and local scorecard paths are in the
+[GPT-6 improvement result record](artifacts/2026-09-24-gpt6-improvement-results.md).
+
+| Skill | Tokens / run | Tool calls / run | Turns / run | Time / run |
+| --- | ---: | ---: | ---: | ---: |
+| `compose-animations` | 58.6k → 85.4k (+46%) | 4 → 5 (+25%) | 1 → 1 (+0%) | 28.2s → 34.8s (+23%) |
+| `compose-component-design` | 48.7k → 73.4k (+51%) | 4 → 5 (+25%) | 1 → 1 (+0%) | 24.4s → 29.5s (+21%) |
+| `compose-focus-navigation` | 59.1k → 84.9k (+44%) | 5 → 5 (+0%) | 1 → 1 (+0%) | 28.9s → 36.6s (+27%) |
+| `compose-performance` | 49.1k → 85.0k (+73%) | 4 → 5 (+25%) | 1 → 1 (+0%) | 26.4s → 31.8s (+21%) |
+| `compose-state-and-effects` | 60.1k → 89.0k (+48%) | 4 → 5 (+25%) | 1 → 1 (+0%) | 28.2s → 37.8s (+34%) |
+| `compose-ui-testing-patterns` | 60.2k → 84.2k (+40%) | 5.5 → 5 (-9%) | 1 → 1 (+0%) | 27.1s → 26.8s (-1%) |
+| `gradle-run` | 59.8k → 104.3k (+75%) | 4 → 7 (+75%) | 1 → 1 (+0%) | 27.6s → 45.3s (+64%) |
+| `kotlin-api-design` | 60.1k → 83.9k (+40%) | 4 → 5 (+25%) | 1 → 1 (+0%) | 32.8s → 38.8s (+18%) |
+| `kotlin-concurrency-and-flow` | 60.0k → 74.0k (+23%) | 4 → 5 (+25%) | 1 → 1 (+0%) | 26.5s → 28.0s (+6%) |
+| `kotlin-control-flow` | 60.9k → 83.9k (+38%) | 5 → 5 (+0%) | 1 → 1 (+0%) | 26.2s → 38.5s (+47%) |
+| `android-benchmark-comparison` | 46.9k → 53.8k (+15%) | 3 → 3 (+0%) | 1 → 1 (+0%) | 23.2s → 35.0s (+51%) |
+| `grounded-writing` | 35.6k → 56.9k (+60%) | 2 → 4 (+100%) | 1 → 1 (+0%) | 23.2s → 22.1s (-5%) |
+| `release-kotlin-library` | 70.2k → 88.3k (+26%) | 4 → 5 (+25%) | 1 → 1 (+0%) | 42.1s → 43.9s (+4%) |
+
+### Claude Code
+
+Claude Code: `claude-haiku-5-5` with high effort, judged by `claude-sonnet-5-5` with high
+effort on Claude Code. The metrics are defined as above, and `—` marks a cell with no
+recorded result. Run provenance and scorecards are in the
+[Claude Code result record](artifacts/2026-10-19-claude-haiku-5-5-sonnet-judge-results.md).
+
+| Skill | Baseline | Automatic | Restraint |
+| --- | ---: | ---: | ---: |
+| `compose-animations` | 91.7% | 100.0% | 100.0% |
+| `compose-component-design` | 86.7% | 100.0% | 100.0% |
+| `compose-focus-navigation` | 100.0% | 100.0% | 100.0% |
+| `compose-performance` | 91.7% | 100.0% | 100.0% |
+| `compose-state-and-effects` | 79.2% | 95.8% | 100.0% |
+| `compose-ui-testing-patterns` | 88.9% | 100.0% | 100.0% |
+| `gradle-run` | 16.7% | 83.3% | 100.0% |
+| `kotlin-api-design` | 91.7% | 91.7% | 100.0% |
+| `kotlin-concurrency-and-flow` | 72.2% | 100.0% | 100.0% |
+| `kotlin-control-flow` | 61.1% | 94.4% | 100.0% |
+| `android-benchmark-comparison` | 33.3% | 100.0% | 100.0% |
+| `deliver-spec` | — | — | 100.0% |
+| `grounded-writing` | 0.0% | 100.0% | 100.0% |
+| `implement-with-subagents` | — | — | 100.0% |
+| `release-kotlin-library` | 16.7% | 100.0% | 100.0% |
+| `run-github-project` | — | — | 100.0% |
+| `shepherd` | — | — | 100.0% |
+| `to-plan` | 16.7% | 100.0% | 100.0% |
+
+Per-run medians, baseline → automatic, for the same configuration:
+
+| Skill | Tokens / run | Tool calls / run | Turns / run | Time / run |
+| --- | ---: | ---: | ---: | ---: |
+| `compose-animations` | 51.8k → 85.9k (+66%) | 6 → 8 (+33%) | 1 → 1 (+0%) | 47.7s → 46.4s (-3%) |
+| `compose-component-design` | 52.2k → 72.8k (+40%) | 6 → 6 (+0%) | 1 → 1 (+0%) | 30.2s → 35.2s (+16%) |
+| `compose-focus-navigation` | 62.2k → 88.9k (+43%) | 7.5 → 8 (+7%) | 1 → 1 (+0%) | 44.6s → 56.9s (+27%) |
+| `compose-performance` | 94.3k → 103.8k (+10%) | 8 → 9 (+12%) | 1 → 1 (+0%) | 45.0s → 51.3s (+14%) |
+| `compose-state-and-effects` | 72.4k → 118.4k (+64%) | 7 → 9 (+29%) | 1 → 1 (+0%) | 39.4s → 51.3s (+30%) |
+| `compose-ui-testing-patterns` | 87.0k → 88.3k (+2%) | 10 → 8 (-20%) | 1 → 1 (+0%) | 39.3s → 44.7s (+13%) |
+| `gradle-run` | 75.6k → 105.6k (+40%) | 6 → 5 (-17%) | 1 → 1 (+0%) | 36.3s → 29.9s (-18%) |
+| `kotlin-api-design` | 96.7k → 101.8k (+5%) | 8 → 9 (+12%) | 1 → 1 (+0%) | 45.4s → 53.5s (+18%) |
+| `kotlin-concurrency-and-flow` | 111.2k → 145.2k (+31%) | 9.5 → 10 (+5%) | 1 → 1 (+0%) | 47.1s → 50.4s (+7%) |
+| `kotlin-control-flow` | 119.5k → 138.1k (+16%) | 10 → 10 (+0%) | 1 → 1 (+0%) | 41.3s → 44.1s (+7%) |
+| `android-benchmark-comparison` | 37.7k → 66.3k (+76%) | 3 → 3 (+0%) | 1 → 1 (+0%) | 22.0s → 22.6s (+3%) |
+| `grounded-writing` | 46.6k → 73.6k (+58%) | 3 → 5 (+67%) | 1 → 1 (+0%) | 19.2s → 28.3s (+47%) |
+| `release-kotlin-library` | 55.5k → 60.7k (+9%) | 5 → 3 (-40%) | 1 → 1 (+0%) | 43.6s → 54.9s (+26%) |
+| `to-plan` | 22.9k → 53.4k (+133%) | 2 → 4 (+100%) | 1 → 1 (+0%) | 9.4s → 21.8s (+132%) |
+
+## Evaluation setup
+
+### Arms
+
+Every case runs in a fresh workspace and conversation under three arms:
+
+- `none` disables every discoverable public skill. A case may declare an
+  evaluator-owned fixture dependency when that dependency is a precondition of
+  the behavior under test; it is supplied identically to every arm and excluded
+  from public-skill routing and metrics.
+- `forced` enables and explicitly invokes only the case's target skill or
+  skills. Negative controls still force the target so over-application remains
+  observable.
+- `automatic` enables every public repository skill whose frontmatter and
+  metadata permit implicit invocation, without naming a skill in the task prompt. This measures
+  cross-domain routing interference and automatic target-skill activation.
+
+Each eligible `case × arm` condition runs three times by default. A case that
+targets no implicitly invokable skill is excluded from the automatic arm before
+execution. The 38-case Compose suite schedules 342 subject calls and 342
+blinded judge calls. The 24-case Kotlin/Gradle suite schedules 216 subject calls
+and 216 blinded judge calls. The 41-case workflows/writing suite schedules 291
+subject calls and 291 blinded judge calls.
+
+Codex subject and judge processes use `--ignore-user-config`, explicit
+`skills.config` entries, network-disabled sandboxes, disabled hosted web search,
+output schemas, and pinned model/reasoning arguments; Claude Code processes use
+the isolation described under Claude Code runs. Review tasks are read-only.
+Edit tasks are graded against a path allowlist. Workspaces and conversations are
+never reused across conditions.
+
+For Codex, the harness disables every skill discovered in the user and plugin
+catalogs.
+For forced and automatic arms it copies only the enabled repository skills into
+the fresh workspace's project-local skill directory (`.agents/skills` for Codex,
+`.claude/skills` for Claude Code) before committing
+the fixture baseline. The subject output schema is staged beside the fixture so
+the baseline command does not disclose the source checkout or target skill
+names. These evaluator-owned files are excluded from the blinded judge packet.
+
+Codex 0.147 does not emit an independent skill-activation event. Routing
+precision and recall therefore use the subject's schema-constrained
+`skills_used` declaration and are labeled **reported routing**. Plugin-qualified
+and local skill identifiers are canonicalized to the same repository skill. They are not
+proof that the runtime loaded a particular `SKILL.md`; outcome differences and
+the human audit provide the behavioral evidence.
+
+Claude Code does record activations: each `Skill` tool call is stored as
+**observed routing** in the record's `observed_skills`. Reported routing stays
+the primary metric, and the scorecard adds observed precision and recall as a
+separate, non-gating diagnostic only when a record has observed activations.
+Codex records store `observed_skills` as `null`.
+
+Cases distinguish required routes from allowed overlaps. Recall measures the
+required `expected_skills`; precision accepts any reported skill in the case's
+`allowed_skills`, which must include every expected skill. This lets a case
+permit a genuinely relevant secondary skill without requiring every successful
+subject to consult it.
+
+A no-skill automatic control sets `automatic_no_skill_control: true`. It still
+runs in the automatic arm, while requiring and permitting no public skill, so
+unnecessary activation remains visible without becoming a routing false
+negative.
+
+### Claude Code runs
+
+Select the subject and judge runtimes independently with `--runtime` and
+`--judge-runtime` (`codex` or `claude`, default `codex`), and point at a
+specific binary with `--claude-executable`. `--reasoning` and
+`--judge-reasoning` are validated per runtime; Claude Code accepts `low`,
+`medium`, `high`, `xhigh`, and `max`. `--judge-model` is always required. Runs
+use the existing `claude` login, not `--bare` or an API key.
+
+- **Isolation flags.** Subjects run `claude -p` with stream-JSON output,
+  `--no-session-persistence`, `--setting-sources project`,
+  `--strict-mcp-config`, `--permission-mode dontAsk`, and pinned `--model` and
+  `--effort`. The output schema is passed inline with `--json-schema`.
+- **Skills.** Enabled repository skills, plus evaluator-owned fixture
+  dependencies mirrored from `.agents/skills`, are staged in
+  `.claude/skills`. Once per experiment, an init-only run in an empty workspace
+  lists the bundled built-in skills and is stopped before any model output.
+  Every built-in that is not staged is set to `"off"` through `skillOverrides`.
+  The built-in list is part of the result fingerprint and is stored in each
+  record as `builtin_skills`. A run that stages no skills adds
+  `--disable-slash-commands`.
+- **Init check.** Before model work, the `system/init` event must list exactly
+  the staged skills, no MCP servers, and no auto-memory path. Auto memory is
+  turned off with `autoMemoryEnabled: false`. On a mismatch the child process
+  is stopped and the run is marked isolation-invalid, so it is excluded from
+  behavioral evidence and routing metrics in every arm.
+- **CLAUDE.md.** `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` is set for subject and judge
+  processes. The harness also refuses a workspace below any `CLAUDE.md` or
+  `CLAUDE.local.md` (other than `~/.claude`). The default output directory is
+  inside the repository, so Claude runs need an `--output-dir` outside it.
+- **Sandbox and tools.** Both task modes run with the bash sandbox enabled and
+  required, no unsandboxed commands, and an empty network allowlist; review
+  tasks also deny sandboxed writes to the workspace.
+  `WebFetch` and `WebSearch` are disallowed. Review tasks get `Read`, `Grep`,
+  `Glob`, `Bash`, and `Skill`; edit tasks add `Edit` and `Write`. Denied
+  permission requests count as attempted commands and tools in the safety
+  checks. The judge gets `Read` only, with slash commands disabled and no stdin.
+- **Forced arm.** The prompt tells the model to invoke each target through the
+  `Skill` tool before any other action. The run is valid only when every target
+  has a successful `Skill` call before any other tool call and its staged body
+  appears in the resulting skill message.
+  Explicit-only targets are staged with their `disable-model-invocation`
+  frontmatter line removed so the `Skill` tool can invoke them; the preflight
+  records this as `frontmatter_edit` and requires the rest of the file to stay
+  byte-identical to the source.
+- **Token counting.** Subject tokens are `input_tokens`,
+  `cache_creation_input_tokens`, `cache_read_input_tokens`, and `output_tokens`
+  summed, which matches Codex because its input already includes cached input.
+  Tool calls are completed tool calls excluding the structured-output call, and
+  a turn is one `result` event.
+
+### Corpus
+
+The Compose benchmark remains 38 scored cases and comprises:
+
+- one direct authorized edit, one novel read-only review, and one authorized
+  no-change control for each of 11 focused concern slices across the six skills;
+- five router reviews spanning single-cluster and multi-skill decisions; and
+- one normalized snapshot from an immutable public revision per concern slice,
+  with source URL, revision, license, and normalization note in `case.json`.
+
+Case IDs retain their focused concern names even when several concerns route to
+the same clustered public skill.
+
+Four calibration-only performance challenge cases are also validated with the
+corpus. They are excluded from default plans and published scorecards; select
+them explicitly with `--case` when deciding whether they should graduate into
+the benchmark.
+
+Two calibration-only workflow challenges exercise actionable failure behavior
+when a required external `tdd` provider is unavailable. They
+are likewise excluded from default plans and published scorecards.
+
+The Kotlin/Gradle benchmark contains 24 scored cases:
+
+- a direct task, novel review, and no-change restraint control for each of its
+  four skills;
+- one additional high-risk branch per skill;
+- one additional direct, novel, and no-change triad for raw thread, blocking
+  cancellation, and executor-backed dispatcher ownership;
+- two read-only Gradle status recovery cases;
+- three multi-skill routing cases; and
+- three immutable public-source snapshots across API, Flow, and control-flow
+  concerns.
+
+The workflows/writing benchmark contains 41 scored cases: direct, novel, and
+no-change coverage for each of its nine skills, plus additional workflow
+scenarios. The surrounding corpus also contains the two calibration-only
+missing-provider challenges described above.
+The changelog triad checks stable-cycle coverage, incremental Unreleased
+maintenance and missing-file restraint across non-Kotlin repositories. The
+release triad checks the changelog handoff, uncertain prerelease recovery,
+and read-only readiness restraint without live publication or credentials.
+Its GitHub-style cases use supplied immutable state and rubric plus
+forbidden-action grading; they do not contact a provider. The
+`implement-with-subagents` review-mode cases have no external fixture
+dependency. Its missing-provider challenge supplies a behavior ticket without
+`tdd` and checks that implementation does not start.
+
+The workflows/writing corpus contains 119 calibration-only cases, including
+the two missing-provider challenges. Select them
+explicitly with `--case`; they do not change the published benchmark or its
+default call count. They cover authorized local planning, prior confirmation,
+checkpoint batching and justified interruptions, scoped repair evidence reuse,
+broad invalidation and explicit full-check requirements, plan validation placement
+and unchanged-plan restraint, two-round external-review convergence with same-owner consolidated repairs,
+related retention/pagination cases, review coverage and browser diagnostics,
+early consequential boundary validation and restraint on unchanged evidence,
+unresolved decisions, proof-gated report publication, implementation-plan
+specificity for complex work with a one-function counterexample, and verification
+evidence reuse versus missing, stale, failed, or explicitly required fresh
+evidence. Six additional cases cover accessible context-pointer handoffs and
+optional shared discovery, including bounded evidence reuse, capacity and
+restraint. The local-planning cases check the generated plan artifact. The scored orchestration
+triad exercises a ready fork/join, a solo serial dependency chain, and restraint for
+a cyclic or incomplete graph, unsafe shared-file overlap, and validation
+invalidated at an integrated head. Additional orchestration calibrations cover
+direct TDD at an approved behavior seam, documentation without TDD, completed
+integration failures repaired forward, final review freshness, dirty-start
+restraint, runtime owner capability, and the accepted-item no-op behavior.
+Four worktree lifecycle cases cover bounded slot reuse, same-owner repair in a
+different slot, preservation of checkouts and artifacts that are unsafe to
+retire, and cleanup failure that blocks workflow completion despite successful
+code verification. These cases assess supplied state read-only and do not prove
+live subagent execution.
+Five ownership calibrations cover a solo chain with integrated-head checks,
+missing final-review capability before solo implementation, worker ownership of
+an entire late-fanout graph, direct controller polling, and one bounded large-log
+question with capability and model selection. Decisive supplied facts have
+mutation-sensitive deterministic fixture checks; model behavior is rubric-graded.
+Three shared-handoff calibrations check bounded implementation ownership,
+rejection of routine PR evidence helpers, and restraint for one-off PR inspection. They also assess supplied state read-only.
+Two host-monitor calibrations check that `shepherd` handles a Claude desktop
+CI-monitor wake with one read and no self-scheduled polling, and sets up the
+monitor from deferred tools with Auto-fix and authorized auto-merge, using
+supplied state without live execution.
+Three delivery calibrations compare manual and Project delegation, safe fork/join
+execution under caller capacity, temporary capacity versus absent worker
+capability, and the trivial-edit exception versus useful overlap and retained
+repair ownership and the clean-checkout preflight. They assess immutable state
+without live execution.
+Deterministic coverage stages `deliver-spec` alone, follows its local procedure
+and handoff links, and checks its bundled procedure independently of the
+orchestration skill's mode-specific procedure.
+Three Project-delivery calibrations cover automatic `deliver-spec` handoff,
+one startup merge question with a 60-second default-no deadline, explicit
+instructions, nonblocking fallback, late replies and invocation expiry,
+ticket-local authority pauses with continued board progress, durable resumption,
+and restraint for retired flags, absent grants, read-only modes and stale
+final-head review. They use immutable synthetic state and have no live-provider
+or model-run evidence.
+Five watcher calibrations cover the `drain` project watcher: staying alive and
+launching it at a human frontier, refreshing before acting on a board-change
+wake, `next` returning without one, no watcher when only an agent notification
+is due, and retaining one watcher across unrelated reads and empty bounded
+host waits with prompt failure delivery. They use immutable synthetic state.
+Fourteen small-ticket calibrations cover the planning-free fast path in
+standalone and Project delivery with escalation, lease revocation and
+small-looking risky counterexamples; drain slot release for reviewed PRs
+waiting on CI, including restart, waiting-cap and global-failure restraint;
+CI-supplied full-suite evidence versus explicit local rules and checks CI
+cannot run; and `to-plan` baselines proven from green CI on the exact base SHA
+while keeping focused checks CI cannot answer. They use immutable synthetic
+state.
+Three nested-agent calibrations check that a delegated owner waits for its
+own reviewer, helpers and slice workers before returning, keeps independent
+launches parallel, and that the top-level controller keeps background launches.
+Three payload-digest calibrations check readback verification, a wrapped CRLF
+predecessor bound to a replan report, and a no-op republish whose draft differs
+only in revision metadata and trailing newlines. They grade decision artifacts
+offline and do not prove live subagent execution.
+
+Three PR-review timing calibrations grade offline decision artifacts for draft
+review during pending CI, earlier readiness when draft support is absent or
+unknown, failed/unknown CI merge refusal, changed-head evidence invalidation,
+compatible evidence retention, stricter repository sequencing, and verified
+host auto-merge enforcement, ready-only CI with supported draft review, and
+missing independent-review evidence, absent/optional/required external-review
+capabilities, and review initiation without a repair in polling and host setup.
+Full-grader integration tests verify that
+correct decision artifacts pass without weakening unchanged-workspace controls.
+Deterministic mutation tests reject delayed review,
+premature acceptance/merge, stale evidence and unsupported auto-merge. These
+checks validate the decision grader and contract packaging; they do not prove
+live model behavior or provider capabilities.
+
+Six affected-validation calibrations cover the Haze shared-field audit and
+unsettled optical-fixture regressions, an audio-fixture planning transfer case,
+rendering propagation through capture bounds and cache/invalidation consumers,
+and no-change controls for settled fixtures and plans. Deterministic checks
+validate supplied-state integrity and standalone reference packaging; semantic
+rubrics cover test selection, calibration sensitivity, preserved acceptance
+coverage and restraint. Corpus validation does not establish model behavior.
+
+Use `--suite compose`, `--suite kotlin-gradle`, or `--suite workflows-writing`
+to select one advisory scorecard. The default remains `compose` for command
+compatibility. Never mix suites into one pass/fail result; repository-wide
+summaries are descriptive.
+
+`case.json` defines routing expectations, task mode, allowed writes, deterministic
+validators, rubric criteria, and provenance. Safety checks for network and external
+tools, permission escalation, destructive commands, undeclared writes, and online
+Gradle invocations are global evaluator policy. `prompt.md` is the arm-neutral task.
+`overlay/` is copied over the fixture selected by the case's suite. The
+Kotlin/Gradle fixture presents subjects with a deterministic networkless
+`gradlew` simulation while external validators use `gradlew-real` to compile
+and test edits with the pinned distribution. Both case and fixture contents are
+included in result fingerprints.
+`expectations.json` is consumed only by the external deterministic grader and is
+not copied into the subject workspace.
+
+No-change controls still expect the relevant domain skill to be consulted. They
+measure behavioral restraint through the unchanged-workspace requirement rather
+than treating correct inspection as a routing false positive.
+
+Validate the entire contract without model calls:
+
+```shell
+npm run evals:validate
+npm test
+```
+
+### Models
+
+The published results use:
+
+- subject:
+  [`gpt-6-luna`](https://developers.openai.com/api/docs/models/gpt-6-luna)
+  with `high` reasoning; and
+- judge:
+  [`gpt-6-sol`](https://developers.openai.com/api/docs/models/gpt-6-sol)
+  with `high` reasoning.
+
+The Luna/high subject left measurable baseline headroom in all three suites.
+The Sol/high judge remained fixed across every arm.
+The Claude Code tables keep that judge and change only the subject.
+
+Keep the pair unchanged across all arms. Use a separate, explicitly named run
+for another model or reasoning effort; never combine fingerprints in one
+scorecard.
+
+For a skill revision, compare the old and revised text on each selected model
+using identical cases, reasoning, tools, and judge settings. A comparison
+between different subject models cannot isolate the effect of the skill edit.
+Explicit-only skills use `none` and `forced`, not `automatic`. Compatibility
+checks assess correctness, restraint, and unnecessary work even when a strong
+baseline leaves no room for correctness uplift; the advisory scorecard gates
+remain unchanged. See the [workflow compatibility record](artifacts/2026-09-06-workflow-model-compatibility.md)
+for the bounded matrix, evidence status, and execution limitations.
+
+## Running evaluations
+
+Preview the complete matrix and call count:
+
+```shell
+python3 evals/run.py plan \
+  --suite kotlin-gradle \
+  --model gpt-6-luna --reasoning high \
+  --judge-model gpt-6-sol --judge-reasoning high \
+  --repetitions 3
+```
+
+Pass current, user-verified per-call cost assumptions to include a USD estimate;
+the harness deliberately does not bake in a price table that can go stale:
+
+```shell
+python3 evals/run.py plan \
+  --model gpt-6-luna --reasoning high \
+  --judge-model gpt-6-sol --judge-reasoning high \
+  --subject-cost-per-call-usd <amount> \
+  --judge-cost-per-call-usd <amount>
+```
+
+`run` is also a preview unless `--execute` is present. Start with a one-case
+smoke run after authenticating Codex and warming the pinned Gradle distribution:
+
+```shell
+python3 evals/run.py run \
+  --suite kotlin-gradle \
+  --case kotlin-api-ownership-direct \
+  --arm none --arm forced --arm automatic \
+  --model gpt-6-luna --reasoning high \
+  --judge-model gpt-6-sol --judge-reasoning high \
+  --subject-cost-per-call-usd <amount> \
+  --judge-cost-per-call-usd <amount> \
+  --repetitions 1 --execute
+```
+
+Use `--skill`, repeated `--case` or `--arm` filters, and `--output-dir` to bound
+a run. Use a fresh output directory for runs with these model settings because
+model settings are part of the result fingerprint. Raw results are atomic and
+fingerprinted by the case, arm, skill commit, runtime versions, and both model
+settings. Reusing the same output directory resumes matching results and rejects
+stale fingerprints.
+The fingerprint also covers the discovered external skill catalog and the exact
+repository skill contents staged into subject workspaces, excluding generated
+Python bytecode caches. It includes the subject and judge runtime names and CLI
+versions, plus the built-in skill list for Claude Code.
+
+Run the same one-case smoke test with Claude Code as the subject. Claude runs
+need an `--output-dir` outside the repository (see Claude Code runs); the judge
+stays on Codex unless `--judge-runtime claude` is passed:
+
+```shell
+python3 evals/run.py run \
+  --runtime claude \
+  --suite kotlin-gradle \
+  --case kotlin-api-ownership-direct \
+  --arm none --arm forced --arm automatic \
+  --model claude-haiku-5-5 --reasoning high \
+  --judge-model gpt-6-sol --judge-reasoning high \
+  --subject-cost-per-call-usd <amount> \
+  --judge-cost-per-call-usd <amount> \
+  --repetitions 1 \
+  --output-dir ~/skill-evals/<run-id> --execute
+```
+
+The report, regrade, and rejudge commands below work the same on a Claude run's
+output directory. Pass `--judge-runtime claude` to rejudge with Claude Code.
+
+Rebuild reports from completed raw records without model calls:
+
+```shell
+python3 evals/run.py report --output-dir .scratch/skill-evals/<run-id>
+```
+
+If deterministic validators or safety matchers change after a run, reapply only
+those local checks without overwriting raw evidence or repeating model calls:
+
+```shell
+python3 evals/run.py regrade --output-dir .scratch/skill-evals/<run-id>
+```
+
+Regraded results and reports are written under `<run-id>/regraded/`.
+
+Persisted blinded packets can be rejudged without repeating subject calls. The
+command previews by default and writes separate fingerprinted rejudgments when
+`--execute` is supplied, preserving the original judgment:
+
+```shell
+python3 evals/run.py judge \
+  --output-dir .scratch/skill-evals/<run-id> \
+  --judge-model gpt-6-sol --judge-reasoning high
+```
+
+It reconciles raw records with the current corpus first, then plans and
+rejudges only measured packets; automatic records that are now ineligible are
+left untouched.
+
+After all rejudgments complete, build a separate scorecard that combines those
+verdicts with the immutable subject and deterministic-grading evidence:
+
+```shell
+python3 evals/run.py rejudged-report \
+  --output-dir .scratch/skill-evals/<run-id>
+```
+
+This report fails rather than guessing if a packet is missing, has no
+rejudgment, or has multiple rejudgments for one packet. Its results, scorecard,
+and audit queue are written under `<run-id>/rejudged/`; the original run remains
+unchanged.
+
+## Scoring and gates
+
+The outcome judge receives an opaque candidate ID, task, rubric, initial source,
+final diff, response, and validator evidence. It never receives the arm, skill selection,
+routing expectation, raw runtime configuration, or deterministic verdict.
+
+A task outcome passes only when all deterministic validators and required judge
+criteria pass. Safety remains an independent result. Each suite's advisory
+scorecard applies these gates over the three repetitions:
+
+- forced positive-case pass rate improves on baseline by at least 10 percentage
+  points;
+- automatic activation retains at least 80% of that uplift, and retention is
+  not met when forced uplift is non-positive;
+- reported automatic-routing micro precision and recall are each at least 85%;
+- forced and automatic no-change controls do not regress below baseline; and
+- forbidden-action failures are zero.
+
+Subject and judge tokens, tool calls, elapsed time, process failures, and retries
+are diagnostics, not gates, as is observed routing. The scorecard also reports
+how often the router itself was declared in the automatic arm. Missing arms or case categories are
+shown as `not met`; filtered smoke runs cannot pass gates they did not evaluate.
+
+## Human audit
+
+Each run writes `results.json`, `scorecard.md`, and `audit-queue.json`. The audit
+queue includes every objective/judge disagreement, every within-condition
+inconsistency, and a deterministic 10% sample of remaining results. Human audit
+decisions supplement raw judgments; they must not overwrite the original
+subject output, validator evidence, or judge response.
+
+Append a decision to the run's JSONL audit ledger:
+
+```shell
+python3 evals/run.py audit --output-dir .scratch/skill-evals/<run-id> \
+  --id <case:arm:repetition> --decision accept --rationale "Evidence checked"
+```
+
+Three additional `to-plan` calibration cases cover unchanged-scope integration
+amendments, receipt/concurrency-sensitive integration, and no-change/unsafe-route
+restraint. Offline artifact checks validate identity, digest and lineage against
+evaluator-owned anchors; they do not establish live publication, semantic review
+quality or consumer adoption. The case definitions are validated; no new model
+results are reported.
+
+Analysis-only cases may opt into `allow_skill_reference_reads` alongside
+`forbid_all_commands`. This permits standalone `cat` reads of target skill
+entrypoints and Markdown files under their `references/` directories in forced
+and automatic arms. Other commands, paths and workflow actions remain forbidden;
+cases without this option retain the single forced-entrypoint-read exception.

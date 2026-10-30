@@ -1,0 +1,114 @@
+import json
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+
+from tests.support import (
+    SCRIPTS,
+    fixture_available,
+    fixture_path,
+    run_commands_concurrently,
+    trace_processor,
+)
+
+
+RUNNER_FIXTURES = (
+    "startup-light-api36",
+    "scroll-aosp-api35",
+    "flutter-texture-api35",
+    "callstack-sampling",
+    "scroll-oppo-api36",
+)
+
+
+def required_execution_errors(result: dict[str, object]) -> list[str]:
+    errors: list[str] = []
+
+    def visit(run: dict[str, object], path: str = "", optional_branch: bool = False) -> None:
+        for step in run.get("steps", []):
+            label = f"{path}/{step['step_id']}"
+            step_optional = optional_branch or bool(step.get("optional"))
+            if not step_optional and step["status"] in {"error", "unsupported"}:
+                errors.append(f"{label}: {step.get('error', step['status'])}")
+            if isinstance(step.get("child"), dict):
+                visit(step["child"], label, step_optional)
+            for item in step.get("items", []):
+                visit(item["result"], label, step_optional)
+
+    visit(result)
+    return errors
+
+
+@unittest.skipUnless(
+    all(fixture_available(fixture_id) for fixture_id in RUNNER_FIXTURES),
+    "full PERFETTO_FIXTURE_ROOT not configured",
+)
+class SkillRunnerIntegrationTest(unittest.TestCase):
+    def test_representative_complete_skill_graphs_run_without_hidden_step_errors(self) -> None:
+        cases = [
+            ("startup_analysis", "startup-light-api36", []),
+            ("scrolling_analysis", "scroll-aosp-api35", []),
+            ("anr_analysis", "startup-light-api36", []),
+            ("memory_analysis", "startup-light-api36", []),
+            (
+                "rendering_pipeline_detection",
+                "flutter-texture-api35",
+                ["--param", 'package="com.example.friendscircle.v27.textureview"'],
+            ),
+            (
+                "callstack_analysis",
+                "callstack-sampling",
+                [],
+            ),
+            (
+                "jank_frame_detail",
+                "scroll-oppo-api36",
+                [
+                    "--param", "start_ts=506731768732822",
+                    "--param", "end_ts=506731787394072",
+                    "--param", "frame_ts=506731768732822",
+                    "--param", "frame_dur=18661250",
+                    "--param", "dur_ms=18.66125",
+                    "--param", "frame_id=59665037",
+                    "--param", 'package="com.example.wechatfriendforcustomscroller"',
+                    "--param", 'jank_type="App Deadline Missed"',
+                ],
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            outputs = [Path(temporary) / skill_id for skill_id, _filename, _extra in cases]
+            completions = run_commands_concurrently(
+                [
+                    [
+                        sys.executable,
+                        str(SCRIPTS / "perfetto_skill.py"),
+                        "run",
+                        str(fixture_path(filename)),
+                        "--skill",
+                        skill_id,
+                        "--trace-processor",
+                        trace_processor(),
+                        "--output-dir",
+                        str(output),
+                        *extra,
+                    ]
+                    for (skill_id, filename, extra), output in zip(cases, outputs)
+                ]
+            )
+            for (skill_id, _filename, _extra), output, completed in zip(cases, outputs, completions):
+                with self.subTest(skill=skill_id):
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+                    result = json.loads((output / "result.json").read_text(encoding="utf-8"))
+                    self.assertTrue(result["success"], result)
+                    self.assertEqual(result["processor"]["status"], "verified")
+                    self.assertEqual(required_execution_errors(result), [])
+                    self.assertGreater(len(result["evidence"]), 0)
+                    self.assertTrue(
+                        all(item.get("processor", {}).get("status") == "verified" for item in result["evidence"]),
+                        result["evidence"],
+                    )
+
+
+if __name__ == "__main__":
+    unittest.main()

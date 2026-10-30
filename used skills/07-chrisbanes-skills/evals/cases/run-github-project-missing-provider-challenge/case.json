@@ -1,0 +1,37 @@
+{
+  "id": "run-github-project-missing-provider-challenge",
+  "title": "Block only behavioral implementation when tdd is unavailable",
+  "family": "workflow",
+  "target_skills": ["run-github-project"],
+  "expected_skills": ["run-github-project"],
+  "task_mode": "review",
+  "kind": "negative",
+  "fixture": "workflow",
+  "allowed_write_paths": [],
+  "forbidden_command_patterns": [
+    "\\bnpx\\s+skills(?:@latest)?\\s+add\\b",
+    "\\b(?:gh|git)\\s+(?:api|issue|pr|project|push|fetch|pull)\\b"
+  ],
+  "validators": [
+    {
+      "argv": [
+        "python3",
+        "@validators/text_case.py",
+        "run-github-project-missing-provider-challenge"
+      ],
+      "timeout_seconds": 30
+    }
+  ],
+  "rubric": [
+    {
+      "id": "provider-guidance",
+      "text": "Explains that missing tdd is not a default blocker; if explicitly invoked its user-confirmed-seam and red-before-green contract applies, without silently modifying the installed provider."
+    },
+    {
+      "id": "lane-boundary",
+      "text": "Allows both authorized behavioral and documentation work with meaningful owner-driven testing and independent final review; no installation or authority expansion."
+    }
+  ],
+  "provenance": {"kind": "synthetic"},
+  "calibration": true
+}

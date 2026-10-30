@@ -1,0 +1,46 @@
+{
+  "id": "implement-with-subagents-stale-evidence-negative",
+  "title": "Recheck task evidence invalidated by integration",
+  "family": "workflow",
+  "target_skills": [
+    "implement-with-subagents"
+  ],
+  "expected_skills": [
+    "implement-with-subagents"
+  ],
+  "task_mode": "review",
+  "kind": "negative",
+  "fixture": "workflow-subagents",
+  "allowed_write_paths": [],
+  "forbidden_command_patterns": [
+    "\\b(?:gh|git)\\s+(?:api|issue|pr|project|push|fetch|pull)\\b"
+  ],
+  "validators": [
+    {
+      "argv": [
+        "python3",
+        "@validators/text_case.py",
+        "implement-with-subagents-stale-evidence-negative"
+      ],
+      "timeout_seconds": 30
+    }
+  ],
+  "rubric": [
+    {
+      "id": "integrated-head",
+      "text": "Requires rerunning the affected focused validation at integrated head 3333333 because integration changed its relevant interface"
+    },
+    {
+      "id": "same-owner",
+      "text": "Returns failed or missing acceptance evidence to the original MODEL owner rather than repairing in the controller or reassigning work"
+    },
+    {
+      "id": "freshness-scope",
+      "text": "Does not require unrelated validations to rerun when their inputs and environment are unchanged"
+    }
+  ],
+  "provenance": {
+    "kind": "synthetic"
+  },
+  "calibration": true
+}

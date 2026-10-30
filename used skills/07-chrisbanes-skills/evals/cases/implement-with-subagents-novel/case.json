@@ -1,0 +1,45 @@
+{
+  "id": "implement-with-subagents-novel",
+  "title": "Honor a serial dependency chain despite available capacity",
+  "family": "workflow",
+  "target_skills": [
+    "implement-with-subagents"
+  ],
+  "expected_skills": [
+    "implement-with-subagents"
+  ],
+  "task_mode": "review",
+  "kind": "novel",
+  "fixture": "workflow-subagents",
+  "allowed_write_paths": [],
+  "forbidden_command_patterns": [
+    "\\b(?:gh|git)\\s+(?:api|issue|pr|project|push|fetch|pull)\\b"
+  ],
+  "validators": [
+    {
+      "argv": [
+        "python3",
+        "@validators/text_case.py",
+        "implement-with-subagents-novel"
+      ],
+      "timeout_seconds": 30
+    }
+  ],
+  "rubric": [
+    {
+      "id": "serial-dependency",
+      "text": "Chooses solo once for the whole serial graph: the lead self-reviews and commits SCHEMA, passes affected checks at the integrated head before WRITER, then READER, without worker slots or separate task acceptance."
+    },
+    {
+      "id": "overlap",
+      "text": "Recognizes shared-file and unmerged-code overlap makes concurrent execution unsafe despite isolated worktrees"
+    },
+    {
+      "id": "repair-owner",
+      "text": "Keeps implementation and repair ownership with the lead for this solo run and retains mandatory independent final review."
+    }
+  ],
+  "provenance": {
+    "kind": "synthetic"
+  }
+}
