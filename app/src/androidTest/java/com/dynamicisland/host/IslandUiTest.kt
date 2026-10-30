@@ -96,6 +96,9 @@ class IslandUiTest {
                 // UIAutomator's wall-clock wait alone cannot drive their recompositions.
                 compose.waitUntil(20000) {
                     try {
+                        // API 35's accessibility cache can retain detached virtual nodes after
+                        // a track-key change; refresh the tree before resolving an action.
+                        if (android.os.Build.VERSION.SDK_INT >= 35) instrumentation.uiAutomation.clearCache()
                         val node = device.findObject(androidx.test.uiautomator.By.desc(description))
                         if (node == null) false else {
                             result = action(node)
