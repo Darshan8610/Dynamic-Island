@@ -159,7 +159,7 @@ class SystemStateObserver(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             val cb = object : AudioManager.AudioRecordingCallback() {
                 override fun onRecordingConfigChanged(configs: List<android.media.AudioRecordingConfiguration>?) {
-                    val inUse = !configs.isNullOrEmpty()
+                    val inUse = configs?.any { MicrophoneRecordingPolicy.isMicrophoneActive(it) } == true
                     _isMicInUse.value = inUse
                     eventBus.emitEvent(SystemIngestionEvent.SystemState.Microphone(inUse))
                 }
@@ -168,7 +168,7 @@ class SystemStateObserver(
             audioManager?.registerAudioRecordingCallback(cb, null)
             runCatching {
                 val currentConfigs = audioManager?.activeRecordingConfigurations
-                val inUse = !currentConfigs.isNullOrEmpty()
+                val inUse = currentConfigs?.any { MicrophoneRecordingPolicy.isMicrophoneActive(it) } == true
                 _isMicInUse.value = inUse
                 eventBus.emitEvent(SystemIngestionEvent.SystemState.Microphone(inUse))
             }

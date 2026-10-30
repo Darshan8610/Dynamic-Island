@@ -31,6 +31,24 @@ import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.compose.runtime.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.app.NotificationCompat
@@ -224,18 +242,33 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
                 val call by repository.currentCall.collectAsState()
                 val count by repository.notificationCount.collectAsState()
                 val status by repository.priorityArbiter.actionStatus.collectAsState()
-                if (panelVisible && !locked) {
-                    IslandExpandedPanel(state, playback, call, count,
-                        onClose = ::collapsePanel, onOpenApp = ::openDashboard,
-                        onOpenSource = ::openSource,
-                        onPlayPause = ::playPause, onNext = ::next, onPrevious = ::previous,
-                        onSeek = ::seek, onCommand = ::command,
-                        onAnswer = ::answer, onHangup = ::hangup, onMute = ::toggleMute,
-                        onSpeaker = ::toggleSpeaker, actionStatus = status)
-                } else FixedIslandCapsule(state, playback, locked, windowRotation,
-                    onOpen = { openPanel(false) },
-                    onPlayPause = { if (!locked && keyguard?.isKeyguardLocked != true) { IslandHaptics.perform(this@DynamicIslandService);playPause() } },
-                    options = options, onGesture = { routeGesture(it,false) }, cornerRadius = androidx.compose.ui.unit.Dp(windowCorner))
+                val microphoneActive by repository.isMicrophoneInUse.collectAsState()
+                val animateContent = !options.reducedMotion && options.motion != MotionPreset.NONE && ValueAnimator.areAnimatorsEnabled()
+                Box(Modifier.fillMaxSize()) {
+                    if (!panelVisible || locked) FixedIslandCapsule(state, playback, locked, windowRotation,
+                        onOpen = { openPanel(false) },
+                        onPlayPause = { if (!locked && keyguard?.isKeyguardLocked != true) { IslandHaptics.perform(this@DynamicIslandService);playPause() } },
+                        options = options, onGesture = { routeGesture(it,false) },
+                        cornerRadius = androidx.compose.ui.unit.Dp(windowCorner), microphoneActive = microphoneActive)
+                    // Removing this subtree immediately on lock avoids retaining private content
+                    // during an exit animation. Re-targeting visibility cancels any entrance.
+                    if (!locked) AnimatedVisibility(visible = panelVisible,
+                        enter = if (animateContent) fadeIn(tween(120)) + scaleIn(initialScale = .98f, animationSpec = tween(160)) else EnterTransition.None,
+                        exit = ExitTransition.None) {
+                        IslandExpandedPanel(state, playback, call, count,
+                            onClose = ::collapsePanel, onOpenApp = ::openDashboard,
+                            onOpenSource = ::openSource,
+                            onPlayPause = ::playPause, onNext = ::next, onPrevious = ::previous,
+                            onSeek = ::seek, onCommand = ::command,
+                            onAnswer = ::answer, onHangup = ::hangup, onMute = ::toggleMute,
+                            onSpeaker = ::toggleSpeaker, actionStatus = status)
+                    }
+                    if (panelVisible && !locked && microphoneActive) {
+                        Box(Modifier.align(Alignment.CenterEnd).padding(end = 3.dp).size(5.dp)
+                            .background(Color(0xFFFF9F0A), CircleShape)
+                            .semantics { contentDescription = "Microphone recording detected" })
+                    }
+                }
             }
         }
         view = v
@@ -345,8 +378,9 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
         val compact = CapsuleAnchor.resolve(width, height, metrics.density,
             hole?.let { PixelRect(it.left, it.top, it.right, it.bottom) },
             settings.widthScale.value, settings.heightScale.value, o.offsetXDp, o.offsetYDp,
-            top, BehaviorPreferences.get(this).options.value.clearSystemBars,
-            maxOf(safeLeft, cutout?.safeInsetLeft ?: 0), maxOf(safeRight, cutout?.safeInsetRight ?: 0))
+            maxOf(top, cutout?.safeInsetTop ?: 0), BehaviorPreferences.get(this).options.value.clearSystemBars,
+            maxOf(safeLeft, cutout?.safeInsetLeft ?: 0), maxOf(safeRight, cutout?.safeInsetRight ?: 0),
+            maxOf(bottom, cutout?.safeInsetBottom ?: 0))
         return if (!expanded) compact else ExpandedAnchor.resolve(compact, width, height,
             metrics.density, overlayContext.resources.configuration.fontScale,
             maxOf(top, cutout?.safeInsetTop ?: 0), maxOf(bottom, cutout?.safeInsetBottom ?: 0),
@@ -370,6 +404,8 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
         val fromCorner = windowCorner
         val toCorner = if (expanded) 28f else 19f
         p.preferredRefreshRate = refresh
+        // Android may choose a different mode for thermal, power or policy reasons.
+        if (Build.VERSION.SDK_INT >= 35) v.requestedFrameRate = refresh
         windowRotation = if (expanded) 0f else b.rotation
         panelVisible = false
         // Outside touches are observed without covering or consuming another app's window.
@@ -378,8 +414,12 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
         fun applyBounds(fraction: Float) {
             windowCorner = fromCorner + (toCorner - fromCorner) * fraction
             fun lerp(a: Int, end: Int) = (a + (end - a) * fraction).toInt()
-            p.x = lerp(from.left, b.left); p.y = lerp(from.top, b.top)
-            p.width = lerp(from.width, b.width); p.height = lerp(from.height, b.height)
+            val x = lerp(from.left, b.left); val y = lerp(from.top, b.top)
+            val width = lerp(from.width, b.width); val height = lerp(from.height, b.height)
+            // Avoid re-layout when consecutive animation samples round to the same pixel.
+            val changed = p.x != x || p.y != y || p.width != width || p.height != height
+            p.x = x; p.y = y; p.width = width; p.height = height
+            if (!changed && fraction != 1f) return
             try { wm.updateViewLayout(v, p) } catch (e: RuntimeException) {
                 Log.e(TAG, "Window update failed", e)
                 fail("Android removed the overlay. Open Dynamic Island to restart it.")

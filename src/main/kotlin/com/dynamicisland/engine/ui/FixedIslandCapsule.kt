@@ -14,6 +14,7 @@ import com.dynamicisland.core.geometry.*
 import com.dynamicisland.engine.settings.BehaviorOptions
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -37,7 +38,8 @@ fun FixedIslandCapsule(state: IslandState, playback: MediaPlaybackSnapshot, lock
     rotation: Float, onOpen: () -> Unit, onPlayPause: () -> Unit,
     options: BehaviorOptions = BehaviorOptions(),
     onGesture: ((GestureAction) -> Unit)? = null,
-    secondary: Boolean = false, cornerRadius: androidx.compose.ui.unit.Dp? = null) {
+    secondary: Boolean = false, cornerRadius: androidx.compose.ui.unit.Dp? = null,
+    microphoneActive: Boolean = false) {
     BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val side = rotation == 90f || rotation == -90f
         val w = if (side) maxHeight else maxWidth
@@ -109,6 +111,13 @@ fun FixedIslandCapsule(state: IslandState, playback: MediaPlaybackSnapshot, lock
             } else if (!secondary && (activity != null || state is IslandState.AlertPeek)) {
                 Text("•", color = tint, fontSize = 20.sp)
             } else if (!secondary) Spacer(Modifier.size(26.dp))
+        }
+        if (!secondary && microphoneActive) {
+            // The platform exposes anonymized microphone recording configurations;
+            // this is an observed capture, not a replacement for the system indicator.
+            Box(Modifier.align(Alignment.CenterEnd).padding(end = 3.dp).size(5.dp)
+                .background(Color(0xFFFF9F0A), CircleShape)
+                .semantics { contentDescription = "Microphone recording detected" })
         }
     }
 }

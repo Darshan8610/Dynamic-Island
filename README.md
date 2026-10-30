@@ -2,8 +2,8 @@
 
 Native Kotlin / Compose camera-adjacent activity capsule for Android 9 and later.
 
-[Download v1.4 APK](https://github.com/Darshan8610/Dynamic-Island/raw/refs/heads/main/deliverables/v1.4/dynamic-island-v1.4.apk)
-· [Source and reports](deliverables/v1.4)
+[Download v1.5 APK](https://github.com/Darshan8610/Dynamic-Island/raw/refs/heads/main/deliverables/v1.5/dynamic-island-v1.5.apk)
+· [Source and reports](deliverables/v1.5)
 
 Tap the capsule to expand music controls in place: artwork, track/artist,
 play/pause, previous/next and seeking when the player supports them. Close with
@@ -26,5 +26,5 @@ The downloadable APK uses the existing development signing identity. Publisher
 signing can be supplied through the environment variables documented in
 [release checklist](docs/RELEASE_CHECKLIST.md). The unsigned AAB is also included.
 
-See [v1.4 changes](docs/V1_4_CHANGES.md), [validation](docs/TEST_REPORT.md) and
+See [v1.5 changes](docs/V1_5_CHANGES.md), [validation](docs/TEST_REPORT.md) and
 [compatibility](docs/COMPATIBILITY_MATRIX.md) for verification and device limits.

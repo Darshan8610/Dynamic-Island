@@ -13,7 +13,7 @@ object CapsuleAnchor {
         widthScale: Float = 1f, heightScale: Float = 1f,
         offsetX: Float = 0f, offsetY: Float = 0f,
         statusBarTop: Int = 0, clearSystemBars: Boolean = true,
-        safeLeft: Int = 0, safeRight: Int = 0
+        safeLeft: Int = 0, safeRight: Int = 0, safeBottom: Int = 0
     ): Window {
         require(screenWidth > 0 && screenHeight > 0)
         require(density.isFinite() && density > 0)
@@ -30,20 +30,22 @@ object CapsuleAnchor {
         val w = (if (side) short else long).coerceAtMost(screenWidth)
         val h = (if (side) long else short).coerceAtMost(screenHeight)
         val gap = (4 * density).roundToInt()
-        var cx = validCutout?.centerX ?: screenWidth / 2f
-        var cy = validCutout?.centerY ?: (statusBarTop + gap + h / 2f)
+        val cx = validCutout?.centerX ?: screenWidth / 2f
+        val cy = validCutout?.centerY ?: (statusBarTop + gap + h / 2f)
+        fun safeOffset(n: Float) = if (n.isFinite()) n * density else 0f
+        var left = (cx - w / 2f + safeOffset(offsetX)).roundToInt().coerceIn(0, screenWidth - w)
+        var top = (cy - h / 2f + safeOffset(offsetY)).roundToInt().coerceIn(0, screenHeight - h)
         if (clearSystemBars) {
+            // Apply the exclusion *after* user offsets. Otherwise a negative nudge
+            // silently moved the capsule back underneath the system's touch area.
+            // If the display is too small, keep the window on-screen instead.
             when (edge) {
-                0 -> cy = maxOf(cy, statusBarTop + gap + h / 2f)
-                1 -> cx = maxOf(cx, safeLeft + gap + w / 2f)
-                2 -> cx = minOf(cx, screenWidth - safeRight - gap - w / 2f)
+                0 -> top = maxOf(top, (statusBarTop.coerceAtLeast(0) + gap).coerceAtMost(screenHeight - h))
+                1 -> left = maxOf(left, (safeLeft.coerceAtLeast(0) + gap).coerceAtMost(screenWidth - w))
+                2 -> left = minOf(left, (screenWidth - safeRight.coerceAtLeast(0) - gap - w).coerceAtLeast(0))
+                3 -> top = minOf(top, (screenHeight - safeBottom.coerceAtLeast(0) - gap - h).coerceAtLeast(0))
             }
         }
-        fun safeOffset(n: Float) = if (n.isFinite()) n * density else 0f
-        return Window(
-            (cx - w / 2f + safeOffset(offsetX)).roundToInt().coerceIn(0, screenWidth - w),
-            (cy - h / 2f + safeOffset(offsetY)).roundToInt().coerceIn(0, screenHeight - h),
-            w, h, rotation
-        )
+        return Window(left, top, w, h, rotation)
     }
 }

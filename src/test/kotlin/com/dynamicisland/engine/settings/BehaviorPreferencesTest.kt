@@ -50,6 +50,17 @@ class BehaviorPreferencesTest {
         return BehaviorPreferences(context)
     }
 
+    @Test fun `high refresh is enabled on upgrade and subsequent opt out persists`() {
+        values["high_refresh_rate"] = false
+        values["clear_system_bars"] = false
+        val upgraded = preferences()
+        assertTrue(upgraded.options.value.highRefreshRate)
+        assertTrue(upgraded.options.value.clearSystemBars)
+        upgraded.update { it.copy(highRefreshRate = false, clearSystemBars = false) }
+        assertFalse(preferences().options.value.highRefreshRate)
+        assertFalse(preferences().options.value.clearSystemBars)
+    }
+
     @Test fun `explicit stop survives recreation and cannot be undone by boot preference`() {
         val first = preferences()
         first.update { it.copy(enabled = true, startOnBoot = true) }

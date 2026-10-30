@@ -25,7 +25,7 @@ data class BehaviorOptions(
     val hideInLandscape: Boolean = false,
     val clearSystemBars: Boolean = true,
     val showOnLockScreen: Boolean = true,
-    val highRefreshRate: Boolean = false,
+    val highRefreshRate: Boolean = true,
     val blockedPackages: Set<String> = emptySet(),
     val quietHours: Boolean = false,
     val quietStart: Int = 1320,
@@ -37,6 +37,17 @@ data class BehaviorOptions(
 /** Shared by the host, service and boot receiver; a deliberate Stop survives process death. */
 class BehaviorPreferences internal constructor(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("island_behavior", Context.MODE_PRIVATE)
+    init {
+        // v1.4 stored its disabled default on every settings change. Enable the
+        // requested high-refresh hint once on upgrade, then respect later choices.
+        if (!prefs.getBoolean("refresh_preference_v15", false)) {
+            prefs.edit().putBoolean("high_refresh_rate", true)
+                // Restore touchable placement for upgrades that previously tried
+                // camera overlap; users can still opt back into overlap afterward.
+                .putBoolean("clear_system_bars", true)
+                .putBoolean("refresh_preference_v15", true).apply()
+        }
+    }
     private val _options = MutableStateFlow(
         BehaviorOptions(
             enabled = prefs.getBoolean("enabled", false),
@@ -56,7 +67,7 @@ class BehaviorPreferences internal constructor(context: Context) {
             hideInLandscape = prefs.getBoolean("hide_landscape", false),
             clearSystemBars = prefs.getBoolean("clear_system_bars", true),
             showOnLockScreen = prefs.getBoolean("show_on_lock_screen", true),
-            highRefreshRate = prefs.getBoolean("high_refresh_rate", false),
+            highRefreshRate = prefs.getBoolean("high_refresh_rate", true),
             blockedPackages = prefs.getStringSet("blocked_packages", emptySet())!!.toSet(),
             quietHours = prefs.getBoolean("quiet_hours", false),
             quietStart = prefs.getInt("quiet_start",1320).coerceIn(0,1439),

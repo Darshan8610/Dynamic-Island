@@ -22,7 +22,8 @@ internal fun CapabilityPanel() {
    "Calls" to if(phone) "Call state enabled; answer/end require Android’s dialer role." else "Optional phone permission not granted.",
    "Multi-SIM" to "Available subscriptions are tracked separately; SIM changes are refreshed with feature permissions.",
    "Accessories" to if(bluetooth) "Connection/name access enabled. Battery data depends on accessory and firmware." else "Optional Bluetooth permission not granted.",
-   "Microphone" to "Android only exposes recording state permitted to this app; no global privacy-indicator replacement.",
+   "Microphone" to "Orange dot for recognized active recordings reported by Android. Some system or vendor captures may be omitted; use the system privacy indicator for complete status.",
+   "Camera" to "Global camera activity is not exposed to ordinary apps. Use Android’s privacy indicator.",
    "Charging" to "Battery status is reported by Android. Fast-charge current is an estimate, not a charger specification.",
    "Hotspot" to "Best-effort vendor broadcasts; not universally available through public APIs.",
    "Lock screen" to "Generic status only. Secure screens and OEM policy can suppress the overlay."

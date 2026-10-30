@@ -23,4 +23,24 @@ class CapsuleAnchorTest {
         val p=CapsuleAnchor.resolve(1080,2400,3f,PixelRect(510,30,570,90),clearSystemBars=false)
         assertEquals(540f,p.left+p.width/2f,1f);assertEquals(60f,p.top+p.height/2f,1f)
     }
+    @Test fun `negative vertical offset cannot defeat status bar clearance`() {
+        val p=CapsuleAnchor.resolve(1080,2400,3f,PixelRect(510,0,570,90), offsetY=-50f,statusBarTop=96)
+        assertTrue(p.top >= 108)
+    }
+    @Test fun `side offsets cannot defeat left or right system gesture clearance`() {
+        val left=CapsuleAnchor.resolve(2400,1080,3f,PixelRect(0,510,90,570), offsetX=-100f,safeLeft=96)
+        val right=CapsuleAnchor.resolve(2400,1080,3f,PixelRect(2310,510,2400,570), offsetX=100f,safeRight=96)
+        assertTrue(left.left >= 108)
+        assertTrue(right.left + right.width <= 2400 - 108)
+    }
+    @Test fun `clearance falls back to available space on a tiny screen`() {
+        val p=CapsuleAnchor.resolve(100,80,3f,PixelRect(45,0,55,10),statusBarTop=200,offsetY=-100f)
+        assertEquals(0,p.top)
+        assertTrue(p.top+p.height<=80)
+    }
+    @Test fun `bottom camera and navigation area remain clear after offsets`() {
+        val p=CapsuleAnchor.resolve(1080,2400,3f,PixelRect(510,2310,570,2400),offsetY=100f,safeBottom=96)
+        assertEquals(180f,p.rotation,0f)
+        assertTrue(p.top+p.height<=2400-108)
+    }
 }

@@ -16,8 +16,9 @@ rules. compile/target API is 36. No physical OEM device has been validated here.
 | Bluetooth | BLUETOOTH_CONNECT on API 31+ | Optional name/connection signals. Vendor battery broadcasts are best-effort, not a guaranteed API. |
 | Battery | Sticky Android battery broadcast | Percentage/charging. Fast-charge current is a heuristic, not charger identification. |
 | Ringer/DND | Public system state | Status observation; no request to change DND policy. |
-| Microphone | Platform-limited AudioManager observations | Does not claim global monitoring or replace Android privacy indicators. |
-| 120 Hz | Optional window refresh hint | Actual display mode depends on panel, OEM, battery and system policy. |
+| Microphone | API 29+ public recording configurations | An orange dot appears for recognized unsilenced inputs; OEM and system-only activity may be omitted. |
+| Camera / combined privacy | Privileged global app-op observation | Not available to ordinary apps; no green or blue privacy dot is asserted. |
+| 120 Hz | Default window refresh hint; view hint on API 35+ | Actual display mode depends on panel, OEM, battery and system policy. |
 | Accessibility | No service registered | No screen reading, screenshot actions, global actions or accessibility elevation. |
 | Network | No INTERNET permission | Artwork and settings stay local. |
 

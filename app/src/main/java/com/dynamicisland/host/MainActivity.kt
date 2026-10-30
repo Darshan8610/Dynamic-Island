@@ -515,7 +515,13 @@ private fun IslandHostScreen(
                 Text("Open app battery & background settings")
             }
             Text("The island stays above ordinary apps while running. Android can hide overlays on protected screens and apps that block overlays.", color = Color(0xFFB8C1BA), fontSize = 13.sp)
-            BehaviorToggle("System-bar touch clearance", "Keeps controls outside the status-bar touch area. Disable only to try exact camera overlap.", options.clearSystemBars) { onOptions(options.copy(clearSystemBars = it)) }
+            BehaviorToggle("System-bar touch clearance", "Keeps the island below protected system touch areas, including when using position offsets. Disable to try exact camera overlap; touches may then go to the system.", options.clearSystemBars) { onOptions(options.copy(clearSystemBars = it)) }
+            OutlinedButton(onClick = {
+                onResetPlacement()
+                onOptions(options.copy(clearSystemBars = true))
+            }, modifier = Modifier.fillMaxWidth()) {
+                Text("Restore touch-safe position")
+            }
             BehaviorToggle("Show on lock screen", "Generic status only. Android or ColorOS may hide overlays on secure screens.", options.showOnLockScreen) { onOptions(options.copy(showOnLockScreen = it)) }
             BehaviorToggle("Prefer 120 Hz", "A display hint while visible; actual refresh rate is controlled by the phone.", options.highRefreshRate) { onOptions(options.copy(highRefreshRate = it)) }
             Text("Behaviour", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)

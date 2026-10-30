@@ -26,6 +26,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -43,6 +47,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.withTransform
+import com.dynamicisland.engine.settings.BehaviorPreferences
+import com.dynamicisland.core.geometry.MotionPreset
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -103,6 +110,13 @@ fun MediaExpandedContent(
         (livePosition.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
     } else 0f
     val fraction = if (isScrubbing) scrubFraction else liveFraction
+    val motionOptions by BehaviorPreferences.get(hapticContext).options.collectAsState()
+    val smoothProgress = playback.isPlaying && playback.canSeek && !motionOptions.reducedMotion &&
+        motionOptions.motion != MotionPreset.NONE && android.animation.ValueAnimator.areAnimatorsEnabled()
+    var frameElapsed by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    LaunchedEffect(smoothProgress) {
+        if (smoothProgress) while (true) withFrameNanos { frameElapsed = SystemClock.elapsedRealtime() }
+    }
     val shownPosition = if (isScrubbing) (scrubFraction * durationMs).toLong() else livePosition
 
     // Avoid allocating a new ImageBitmap wrapper on every 500ms ticker tick
@@ -206,7 +220,11 @@ fun MediaExpandedContent(
         if (playback.canSeek) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 IslandScrubber(
-                    fraction = fraction,
+                    fraction = {
+                        if (smoothProgress && !isScrubbing && durationMs > 0L)
+                            (playback.positionAt(frameElapsed).toFloat() / durationMs).coerceIn(0f, 1f)
+                        else fraction
+                    },
                     isScrubbing = isScrubbing,
                     onScrubStart = { f ->
                         isScrubbing = true
@@ -350,7 +368,7 @@ private fun TransportButton(
  */
 @Composable
 private fun IslandScrubber(
-    fraction: Float,
+    fraction: () -> Float,
     isScrubbing: Boolean,
     onScrubStart: (Float) -> Unit,
     onScrubMove: (Float) -> Unit,
@@ -423,34 +441,34 @@ private fun IslandScrubber(
             cornerRadius = radius
         )
 
-        val filled = trackWidth * fraction.coerceIn(0f, 1f)
+        val filled = trackWidth * fraction().coerceIn(0f, 1f)
         val knobCenter = Offset(trackLeft + filled, centerY)
 
         if (filled > 0f) {
-            // Luminous glowing progress bar with active trail gradient
-            val trailBrush = Brush.horizontalGradient(
-                colors = SCRUBBER_TRAIL_COLORS,
-                startX = trackLeft,
-                endX = (trackLeft + filled).coerceAtLeast(trackLeft + 1f)
-            )
-
+            // A soft line under the bright progress and a short fading trail at its head.
             drawRoundRect(
-                brush = trailBrush,
+                color = Color.White.copy(alpha = .12f),
+                topLeft = Offset(trackLeft, centerY - trackHeight),
+                size = Size(filled, trackHeight * 2f), cornerRadius = CornerRadius(trackHeight)
+            )
+            drawRoundRect(
+                color = Color.White.copy(alpha = .8f),
                 topLeft = Offset(trackLeft, centerY - trackHeight / 2f),
-                size = Size(filled.coerceIn(0f, trackWidth), trackHeight),
-                cornerRadius = radius
+                size = Size(filled, trackHeight), cornerRadius = radius
             )
-
-            // Luminous trailing glow halo behind the scrubber knob
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = SCRUBBER_GLOW_COLORS,
-                    center = knobCenter,
-                    radius = baseKnobRadiusPx * 3.2f * thumbScale
-                ),
-                radius = baseKnobRadiusPx * 3.2f * thumbScale,
-                center = knobCenter
-            )
+            val glowRadius = baseKnobRadiusPx * 3.2f * thumbScale
+            // Reuse one normalized shader instead of allocating a new gradient each frame.
+            for (step in 3 downTo 0) {
+                val distance = step * baseKnobRadiusPx * 1.5f
+                if (distance > filled) continue
+                withTransform({
+                    translate(knobCenter.x - distance, centerY)
+                    scale(glowRadius, glowRadius, Offset.Zero)
+                }) {
+                    drawCircle(SCRUBBER_GLOW_BRUSH, radius = 1f, center = Offset.Zero,
+                        alpha = if (step == 0) .9f else .12f * (4 - step))
+                }
+            }
         }
 
         drawCircle(
@@ -461,17 +479,10 @@ private fun IslandScrubber(
     }
 }
 
-// Pre-allocated static brushes and colors to guarantee zero allocations in the draw loop
 private val SCRUBBER_TRACK_COLOR = Color(0x2EFFFFFF)
-private val SCRUBBER_TRAIL_COLORS = listOf(
-    Color(0x59FFFFFF),
-    Color(0xB3FFFFFF),
-    Color.White
-)
-private val SCRUBBER_GLOW_COLORS = listOf(
-    Color(0x66FFFFFF),
-    Color(0x1FFFFFFF),
-    Color.Transparent
+private val SCRUBBER_GLOW_BRUSH = Brush.radialGradient(
+    colors = listOf(Color(0x66FFFFFF), Color(0x1FFFFFFF), Color.Transparent),
+    center = Offset.Zero, radius = 1f
 )
 
 private val FLAT_BARS = List(5) { 0.12f }
