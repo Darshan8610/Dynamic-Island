@@ -24,4 +24,6 @@ python3 tools/check-secrets.py
 
 The development-signing property is an explicit opt-in for sideload testing. Publisher signing continues to use the four documented ISLAND_KEYSTORE_* / ISLAND_KEY_* environment variables. A locally generated development key is not guaranteed to match previous APKs; signing material is never committed.
 
-Validation status will be completed with the final artifact. Physical-device/OEM compatibility and sustained 120 Hz operation require separate device evidence.
+Validation passed: 130 core tests, 138 engine tests, engine/app lint with zero errors, R8 APK/AAB builds, APK signing/alignment checks, and all six connected tests on Android 15/API 35. The CI-built release APK installed and launched without an AndroidRuntime fatal exception. See the [successful verification run](https://github.com/Darshan8610/Dynamic-Island/actions/runs/41109792433) at test/CI commit `1d9ee09ae7125ff37fbd214ff76bb006cdada3fd`; runtime sources match APK build commit `e3a8ef1f0bfc873076506347327e2b5acb2fedee`.
+
+The UI harness advances Compose event time and refreshes cached accessibility nodes before actions. Earlier test-harness failures and a local software-emulator boot timeout are retained in the downloadable verification archive. Physical-device/OEM compatibility and sustained 120 Hz operation require separate device evidence.
