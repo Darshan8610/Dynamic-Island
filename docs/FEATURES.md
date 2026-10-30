@@ -1,3 +1,6 @@
+> v1.4 update: tap now expands controls in the overlay. Earlier references to
+> host-only expansion are superseded by [v1.4 changes](V1_4_CHANGES.md).
+
 # v1.3 feature completion
 
 The remaining implementation and build tooling from the earlier feature report are

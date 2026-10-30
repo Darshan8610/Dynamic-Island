@@ -1,3 +1,6 @@
+> v1.4 update: tap now expands controls in the overlay. Earlier references to
+> host-only expansion are superseded by [v1.4 changes](V1_4_CHANGES.md).
+
 # Dynamic Island 1.2
 
 ## Changes

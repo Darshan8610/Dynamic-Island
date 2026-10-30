@@ -37,7 +37,7 @@ internal fun ExperienceSettingsPanel(options: BehaviorOptions, onOptions: (Behav
 @Composable private fun <T : Enum<T>> ChoiceRow(label: String, choices: List<T>, selected: T, onSelect:(T)->Unit) {
     Text(label,color=Color.White)
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-        choices.forEach { value -> FilterChip(selected=value==selected,onClick={onSelect(value)},label={Text(value.name.lowercase().replace('_',' '))}) }
+        choices.forEach { value -> FilterChip(selected=value==selected,onClick={onSelect(value)},label={Text(if (value == GestureAction.OPEN_DASHBOARD) "Expand island" else value.name.lowercase().replace('_',' '))}) }
     }
 }
 @Composable private fun SettingToggle(label:String,value:Boolean,change:(Boolean)->Unit) {

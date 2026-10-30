@@ -310,6 +310,10 @@ class MediaSessionTracker(
         recomputePrimaryController()
         if (_primaryController.value?.sessionToken != controller.sessionToken) return
 
+        publishPlayback(controller, state)
+    }
+
+    private fun publishPlayback(controller: MediaController, state: PlaybackState?) {
         val isPlaying = state?.state == PlaybackState.STATE_PLAYING
         val playbackStateVal = state?.state ?: PlaybackState.STATE_NONE
         val position = state?.position ?: 0L
@@ -329,13 +333,15 @@ class MediaSessionTracker(
                 durationMs = duration,
                 playbackSpeed = speed,
                 lastUpdateElapsedRealtime = lastUpdate,
-                supportedActions = state?.actions ?: 0L
+                supportedActions = (state?.actions ?: 0L) or fallbackActions(controller.packageName)
             )
         )
     }
 
     private fun handleMetadataChanged(controller: MediaController, metadata: MediaMetadata?) {
         if (metadata == null || _primaryController.value?.sessionToken != controller.sessionToken) return
+        // Track duration can change without a playback-state callback.
+        publishPlayback(controller, controller.playbackState)
 
         // An idle session still carries metadata — the platform keeps one for
         // nearly every installed app, and it publishes metadata while playing
@@ -508,13 +514,20 @@ class MediaSessionTracker(
         prev: PendingIntent?
     ) {
         val pkg = packageName ?: _primaryController.value?.packageName ?: mostRecentPackage ?: return
-        val current = fallbackIntentsByPackage[pkg] ?: FallbackTransport()
         fallbackIntentsByPackage[pkg] = FallbackTransport(
             playPause = playPause,
             next = next,
             prev = prev
         )
         mostRecentPackage = pkg
+        _primaryController.value?.takeIf { it.packageName == pkg }?.let { publishPlayback(it, it.playbackState) }
+    }
+
+    private fun fallbackActions(pkg: String): Long {
+        val fallback = fallbackIntentsByPackage[pkg] ?: return 0L
+        return (if (fallback.playPause != null) PlaybackState.ACTION_PLAY_PAUSE else 0L) or
+            (if (fallback.next != null) PlaybackState.ACTION_SKIP_TO_NEXT else 0L) or
+            (if (fallback.prev != null) PlaybackState.ACTION_SKIP_TO_PREVIOUS else 0L)
     }
 
     fun updateFallbackIntents(playPause: PendingIntent?, next: PendingIntent?, prev: PendingIntent?) {

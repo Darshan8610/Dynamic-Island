@@ -24,6 +24,35 @@ class VisualTestActivity : ComponentActivity() {
     var taps by mutableIntStateOf(0)
     var plays by mutableIntStateOf(0)
     var outsideTaps by mutableIntStateOf(0)
+    var nextTracks = 0
+    var previousTracks = 0
+    var transportPlays = 0
+    var transportPauses = 0
+    private var testSession: android.media.session.MediaSession? = null
+    fun startTestMedia() {
+        testSession?.release()
+        val session = android.media.session.MediaSession(this, "Island instrumentation")
+        testSession = session
+        fun publish(playing: Boolean) {
+            session.setMetadata(android.media.MediaMetadata.Builder()
+                .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, "Test track ${nextTracks - previousTracks + 1}")
+                .putString(android.media.MediaMetadata.METADATA_KEY_ARTIST, "Device test")
+                .putLong(android.media.MediaMetadata.METADATA_KEY_DURATION, 180000).build())
+            session.setPlaybackState(android.media.session.PlaybackState.Builder()
+                .setActions(android.media.session.PlaybackState.ACTION_PLAY or android.media.session.PlaybackState.ACTION_PAUSE or
+                    android.media.session.PlaybackState.ACTION_SKIP_TO_NEXT or android.media.session.PlaybackState.ACTION_SKIP_TO_PREVIOUS or android.media.session.PlaybackState.ACTION_SEEK_TO)
+                .setState(if(playing) android.media.session.PlaybackState.STATE_PLAYING else android.media.session.PlaybackState.STATE_PAUSED, 10000, if(playing) 1f else 0f).build())
+        }
+        session.setCallback(object : android.media.session.MediaSession.Callback() {
+            override fun onPlay() { transportPlays++; publish(true) }
+            override fun onPause() { transportPauses++; publish(false) }
+            override fun onSkipToNext() { nextTracks++; publish(true) }
+            override fun onSkipToPrevious() { previousTracks++; publish(true) }
+        })
+        publish(true)
+        session.isActive = true
+    }
+    override fun onDestroy() { testSession?.release(); super.onDestroy() }
     override fun onCreate(state:Bundle?) {
         super.onCreate(state)
         setContent {

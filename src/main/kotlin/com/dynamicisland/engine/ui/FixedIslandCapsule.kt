@@ -3,7 +3,6 @@ package com.dynamicisland.engine.ui
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -38,7 +37,7 @@ fun FixedIslandCapsule(state: IslandState, playback: MediaPlaybackSnapshot, lock
     rotation: Float, onOpen: () -> Unit, onPlayPause: () -> Unit,
     options: BehaviorOptions = BehaviorOptions(),
     onGesture: ((GestureAction) -> Unit)? = null,
-    secondary: Boolean = false) {
+    secondary: Boolean = false, cornerRadius: androidx.compose.ui.unit.Dp? = null) {
     BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val side = rotation == 90f || rotation == -90f
         val w = if (side) maxHeight else maxWidth
@@ -81,9 +80,10 @@ fun FixedIslandCapsule(state: IslandState, playback: MediaPlaybackSnapshot, lock
         val duration = if(options.reducedMotion || !android.animation.ValueAnimator.areAnimatorsEnabled()) 0 else when(options.motion) {
             MotionPreset.NONE -> 0; MotionPreset.GENTLE -> 180; MotionPreset.RESPONSIVE -> 90
         }
+        val shape = if (cornerRadius != null) RoundedCornerShape(cornerRadius) else RoundedCornerShape(percent = 50)
         Row(Modifier.requiredSize(w, h).graphicsLayer { rotationZ = rotation }
-            .clip(RoundedCornerShape(percent = 50)).background(Color.Black)
-            .border(if(options.appearance==AppearancePreset.HIGH_CONTRAST) 1.dp else 0.dp,if(options.appearance==AppearancePreset.HIGH_CONTRAST) Color.White else Color.Transparent,RoundedCornerShape(percent=50))
+            .clip(shape).background(Color.Black)
+            .border(if(options.appearance==AppearancePreset.HIGH_CONTRAST) 1.dp else 0.dp,if(options.appearance==AppearancePreset.HIGH_CONTRAST) Color.White else Color.Transparent,shape)
             .pointerInput(locked,media) {
                 detectHorizontalDragGestures(onDragStart={drag=0f},
                     onHorizontalDrag={ change, amount -> change.consume(); drag += amount },
@@ -102,9 +102,8 @@ fun FixedIslandCapsule(state: IslandState, playback: MediaPlaybackSnapshot, lock
             // Leave the hardware aperture area clear. Never place controls over the hole.
             if (!secondary) Spacer(Modifier.weight(1f))
             if (!secondary && media && !locked && playback.canPlayPause) {
-                Box(Modifier.size(30.dp).clip(RoundedCornerShape(50))
-                    .clickable(onClick = onPlayPause)
-                    .semantics { contentDescription = if (playback.isPlaying) "Pause music" else "Play music" }, contentAlignment = Alignment.Center) {
+                // One tap target across the capsule. Transport actions live in the expanded card.
+                Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
                     IslandGlyph(if (playback.isPlaying) IslandSymbol.PAUSE else IslandSymbol.PLAY, Color.White, Modifier.size(17.dp))
                 }
             } else if (!secondary && (activity != null || state is IslandState.AlertPeek)) {

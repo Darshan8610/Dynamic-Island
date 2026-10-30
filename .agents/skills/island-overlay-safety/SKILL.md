@@ -12,8 +12,9 @@ Read `src/main/kotlin/com/dynamicisland/engine/service/DynamicIslandService.kt`,
    a fullscreen pass-through window, hidden input APIs or accessibility elevation.
 2. Compute bounds from the same physical display coordinate space as the cutout.
    Test portrait, both side cutouts, tiny screens and large manual offsets.
-3. Keep dimensions independent of activity state. The user explicitly chose a fixed
-   capsule. Use host cards for expanded content, not growing overlay windows.
+3. Keep compact dimensions independent of activity state. The user now requests
+   explicit expansion on tap. Expand only for user interaction, stay within usable
+   display bounds, and collapse on outside touch, close control, lock and screen-off.
 4. Never claim precedence over protected system UI. Keyguard suppresses private text
    and actions; screen-off must not wake the phone. Permission failures remove the window.
 5. Run `./gradlew :core:test :testDebugUnitTest :app:assembleRelease :lintDebug :app:lintDebug`.

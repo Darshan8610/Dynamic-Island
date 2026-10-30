@@ -9,7 +9,9 @@
 - [ ] Test at least two real media players, rapid track changes, timers and multiple SIMs.
 - [ ] Review deterministic screenshots and device benchmark traces; generate a device profile.
 - [ ] Configure ISLAND_KEYSTORE_PATH, ISLAND_KEYSTORE_PASSWORD, ISLAND_KEY_ALIAS and ISLAND_KEY_PASSWORD securely for publisher signing.
-- [ ] Build :app:assembleRelease and :app:bundleRelease; verify signatures and SHA-256 hashes.
+- [x] Build :app:assembleRelease and :app:bundleRelease; verify development APK signature and SHA-256 hashes.
 - [ ] Test an upgrade using the same publisher key. A development-signed build cannot update another identity.
 
-No publishing, signing-key replacement, GitHub push or Play submission occurs automatically.
+The user authorized committing this repair and its development-signed APK to the
+repository main branch. That authorization does not include Play publication or
+replacing a publisher signing key. Device checks below remain separate release gates.

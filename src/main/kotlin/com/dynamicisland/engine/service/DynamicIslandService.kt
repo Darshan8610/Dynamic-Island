@@ -1,5 +1,11 @@
 package com.dynamicisland.engine.service
 
+import android.animation.ValueAnimator
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.view.MotionEvent
+import android.view.animation.DecelerateInterpolator
+import com.dynamicisland.engine.ui.IslandExpandedPanel
 import android.app.KeyguardManager
 import android.app.AppOpsManager
 import com.dynamicisland.core.geometry.*
@@ -47,7 +53,7 @@ import com.dynamicisland.engine.window.OverlayWindowPolicy
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
-/** Owns exactly one small, opaque window, using public Android window APIs only. */
+/** Owns bounded compact/expanded windows using public Android window APIs only. */
 class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
     companion object {
         const val ACTION_STOP = "com.dynamicisland.engine.action.STOP"
@@ -99,13 +105,13 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
             context.stopService(Intent(context, DynamicIslandService::class.java))
         }
         fun command(command: IslandUserCommand) { instance?.repository?.sendUserCommand(command) }
-        fun playPause() { instance?.let { if (_playback.value.isPlaying) it.repository.mediaPause() else it.repository.mediaPlay() } }
-        fun next() { instance?.repository?.mediaSkipNext() }
-        fun previous() { instance?.repository?.mediaSkipPrevious() }
+        fun playPause() { instance?.let { if (it.keyguard?.isKeyguardLocked == true || !_playback.value.canPlayPause) return; if (_playback.value.isPlaying) it.repository.mediaPause() else it.repository.mediaPlay() } }
+        fun next() { instance?.let { if (it.keyguard?.isKeyguardLocked != true && _playback.value.canNext) it.repository.mediaSkipNext() } }
+        fun previous() { instance?.let { if (it.keyguard?.isKeyguardLocked != true && _playback.value.canPrevious) it.repository.mediaSkipPrevious() } }
         fun openMediaSource() { instance?.let { service ->
             if (service.keyguard?.isKeyguardLocked != true) com.dynamicisland.engine.util.PendingIntentCompat.send(service, _media.value?.deepLinkIntent)
         } }
-        fun seek(position: Long) { instance?.repository?.mediaSeekTo(position) }
+        fun seek(position: Long) { instance?.let { if (it.keyguard?.isKeyguardLocked != true && _playback.value.canSeek) it.repository.mediaSeekTo(position) } }
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -117,6 +123,15 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
     override val viewModelStore: ViewModelStore get() = store
     private lateinit var repository: DynamicIslandRepository
     private lateinit var wm: WindowManager
+    private lateinit var overlayContext: Context
+    private var idleExpanded by mutableStateOf(false)
+    private var panelVisible by mutableStateOf(false)
+    private var windowAnimator: ValueAnimator? = null
+    private var targetBounds: CapsuleAnchor.Window? = null
+    private var targetExpanded = false
+    private var windowCorner by mutableFloatStateOf(19f)
+    private var stopping = false
+    private val isExpanded: Boolean get() = !locked && (idleExpanded || repository.islandState.value is IslandState.Expanded || repository.islandState.value is IslandState.NotificationInbox)
     private lateinit var settings: IslandSettings
     private var view: ComposeView? = null
     private var params: WindowManager.LayoutParams? = null
@@ -135,7 +150,12 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
     private var receiverRegistered = false
     private val keyguard get() = getSystemService(KeyguardManager::class.java)
     private val screenReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) { updateVisibility() }
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_SCREEN_OFF) collapsePanel()
+            updateVisibility()
+            updateWindow(animate = false)
+            updateBubble()
+        }
     }
 
     override fun onCreate() {
@@ -144,7 +164,11 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
         saved.performRestore(null)
         registry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         instance = this
-        wm = getSystemService(WindowManager::class.java)
+        val display = getSystemService(android.hardware.display.DisplayManager::class.java)
+            .getDisplay(android.view.Display.DEFAULT_DISPLAY)
+        overlayContext = if (Build.VERSION.SDK_INT >= 30 && display != null)
+            createDisplayContext(display).createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null) else this
+        wm = overlayContext.getSystemService(WindowManager::class.java)
         settings = IslandSettings.get(this)
         repository = DynamicIslandRepository(applicationContext)
         if (!BehaviorPreferences.get(this).options.value.enabled || !Settings.canDrawOverlays(this)) {
@@ -159,7 +183,11 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
             attachWindow()
             scope.launch { repository.currentCall.collect { _call.value = it } }
             scope.launch { repository.batteryState.collect { _battery.value = it } }
-            scope.launch { repository.islandState.collect { _state.value = it; updateBubble() } }
+            scope.launch { repository.islandState.collect {
+                _state.value = it
+                if (it !is IslandState.Closed) idleExpanded = false
+                updateWindow(); updateBubble()
+            } }
             scope.launch { repository.priorityArbiter.actionStatus.collect { _actionStatus.value = it } }
             scope.launch { repository.mediaPlayback.collect { _playback.value = it } }
             scope.launch { repository.priorityArbiter.mediaActivity.collect { _media.value = it } }
@@ -184,7 +212,7 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
     }
 
     private fun attachWindow() {
-        val v = ComposeView(this).apply {
+        val v = ComposeView(overlayContext).apply {
             setViewTreeLifecycleOwner(this@DynamicIslandService)
             setViewTreeSavedStateRegistryOwner(this@DynamicIslandService)
             setViewTreeViewModelStoreOwner(this@DynamicIslandService)
@@ -193,10 +221,21 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
                 val state by repository.islandState.collectAsState()
                 val playback by repository.mediaPlayback.collectAsState()
                 val options by BehaviorPreferences.get(this@DynamicIslandService).options.collectAsState()
-                FixedIslandCapsule(state, playback, locked, windowRotation,
-                    onOpen = ::openDashboard,
+                val call by repository.currentCall.collectAsState()
+                val count by repository.notificationCount.collectAsState()
+                val status by repository.priorityArbiter.actionStatus.collectAsState()
+                if (panelVisible && !locked) {
+                    IslandExpandedPanel(state, playback, call, count,
+                        onClose = ::collapsePanel, onOpenApp = ::openDashboard,
+                        onOpenSource = ::openSource,
+                        onPlayPause = ::playPause, onNext = ::next, onPrevious = ::previous,
+                        onSeek = ::seek, onCommand = ::command,
+                        onAnswer = ::answer, onHangup = ::hangup, onMute = ::toggleMute,
+                        onSpeaker = ::toggleSpeaker, actionStatus = status)
+                } else FixedIslandCapsule(state, playback, locked, windowRotation,
+                    onOpen = { openPanel(false) },
                     onPlayPause = { if (!locked && keyguard?.isKeyguardLocked != true) { IslandHaptics.perform(this@DynamicIslandService);playPause() } },
-                    options = options, onGesture = { routeGesture(it,false) })
+                    options = options, onGesture = { routeGesture(it,false) }, cornerRadius = androidx.compose.ui.unit.Dp(windowCorner))
             }
         }
         view = v
@@ -206,10 +245,14 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
         }
         params = p
         windowRotation = bounds.rotation
+        v.setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_OUTSIDE && isExpanded) collapsePanel()
+            false
+        }
         wm.addView(v, p)
         v.setOnApplyWindowInsetsListener { _, insets ->
             // API 28/29 cutout information becomes available only after attachment.
-            v.post { if (v.isAttachedToWindow) updateWindow() }
+            v.post { if (v.isAttachedToWindow) updateWindow(animate = false) }
             insets
         }
         updateVisibility()
@@ -228,8 +271,8 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
         if (allowed == GestureAction.NONE) return
         IslandHaptics.perform(this)
         when(allowed) {
-            GestureAction.OPEN_DASHBOARD -> { if(secondary) repository.sendUserCommand(IslandUserCommand.TapSecondary); openDashboard() }
-            GestureAction.OPEN_SOURCE -> activity?.deepLinkIntent?.let { if(!com.dynamicisland.engine.util.PendingIntentCompat.send(this,it)) _error.value="The source app could not open. Open it from your app drawer." } ?: openDashboard()
+            GestureAction.OPEN_DASHBOARD -> openPanel(secondary)
+            GestureAction.OPEN_SOURCE -> if (activity != null) openSource(activity) else openDashboard()
             GestureAction.PLAY_PAUSE -> if(_playback.value.canPlayPause) playPause()
             GestureAction.NEXT_TRACK -> if(_playback.value.canNext) next()
             GestureAction.PREVIOUS_TRACK -> if(_playback.value.canPrevious) previous()
@@ -245,7 +288,7 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
     private fun updateBubble() {
         val options=BehaviorPreferences.get(this).options.value
         val current=repository.islandState.value as? IslandState.Minimal
-        if (!options.secondaryBubble || current == null || locked || view?.visibility != View.VISIBLE || !Settings.canDrawOverlays(this)) { removeBubble(); return }
+        if (isExpanded || !options.secondaryBubble || current == null || locked || view?.visibility != View.VISIBLE || !Settings.canDrawOverlays(this)) { removeBubble(); return }
         val primary=resolveBounds()
         val size=resources.displayMetrics
         val displayBounds=if(Build.VERSION.SDK_INT>=30) wm.maximumWindowMetrics.bounds else android.graphics.Rect(0,0,size.widthPixels,size.heightPixels)
@@ -253,7 +296,7 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
         if(bounds==null) { removeBubble();return }
         bubbleActivity=current.secondary; bubbleRotation=bounds.rotation
         if(bubbleView==null) {
-            val v=ComposeView(this).apply {
+            val v=ComposeView(overlayContext).apply {
                 setViewTreeLifecycleOwner(this@DynamicIslandService);setViewTreeSavedStateRegistryOwner(this@DynamicIslandService);setViewTreeViewModelStoreOwner(this@DynamicIslandService)
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnLifecycleDestroyed(this@DynamicIslandService))
                 setContent {
@@ -272,17 +315,21 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
         }
     }
 
-    private fun resolveBounds(): CapsuleAnchor.Window {
-        val metrics = resources.displayMetrics
+    private fun resolveBounds(expanded: Boolean = false): CapsuleAnchor.Window {
+        val metrics = overlayContext.resources.displayMetrics
         var width = metrics.widthPixels
         var height = metrics.heightPixels
         var cutout = view?.rootWindowInsets?.displayCutout
         var top = 0
+        var bottom = 0
+        var safeLeft = 0
+        var safeRight = 0
         if (Build.VERSION.SDK_INT >= 30) {
             val m = wm.maximumWindowMetrics
             width = m.bounds.width(); height = m.bounds.height()
             cutout = m.windowInsets.displayCutout
-            top = m.windowInsets.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top
+            val bars = m.windowInsets.getInsetsIgnoringVisibility(WindowInsets.Type.systemBars())
+            top = bars.top; bottom = bars.bottom; safeLeft = bars.left; safeRight = bars.right
         } else {
             @Suppress("DEPRECATION")
             val size = android.graphics.Point().also { wm.defaultDisplay.getRealSize(it) }
@@ -290,30 +337,98 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
             @Suppress("DiscouragedApi")
             val id = resources.getIdentifier("status_bar_height", "dimen", "android")
             if (id != 0) top = resources.getDimensionPixelSize(id)
+            @Suppress("DEPRECATION")
+            view?.rootWindowInsets?.let { bottom = it.stableInsetBottom; safeLeft = it.stableInsetLeft; safeRight = it.stableInsetRight }
         }
         val hole = cutout?.boundingRects?.filter { !it.isEmpty }?.minByOrNull { it.width() * it.height() }
         val o = settings.offset.value
-        return CapsuleAnchor.resolve(width, height, metrics.density,
+        val compact = CapsuleAnchor.resolve(width, height, metrics.density,
             hole?.let { PixelRect(it.left, it.top, it.right, it.bottom) },
             settings.widthScale.value, settings.heightScale.value, o.offsetXDp, o.offsetYDp,
             top, BehaviorPreferences.get(this).options.value.clearSystemBars,
-            cutout?.safeInsetLeft ?: 0, cutout?.safeInsetRight ?: 0)
+            maxOf(safeLeft, cutout?.safeInsetLeft ?: 0), maxOf(safeRight, cutout?.safeInsetRight ?: 0))
+        return if (!expanded) compact else ExpandedAnchor.resolve(compact, width, height,
+            metrics.density, overlayContext.resources.configuration.fontScale,
+            maxOf(top, cutout?.safeInsetTop ?: 0), maxOf(bottom, cutout?.safeInsetBottom ?: 0),
+            maxOf(safeLeft, cutout?.safeInsetLeft ?: 0), maxOf(safeRight, cutout?.safeInsetRight ?: 0))
     }
 
-    private fun updateWindow() {
+    private fun updateWindow(animate: Boolean = true) {
         val v = view ?: return
         val p = params ?: return
+        if (stopping || !v.isAttachedToWindow) return
         if (!Settings.canDrawOverlays(this)) { fail("Display permission was removed. Allow it again to resume."); return }
-        val b = resolveBounds()
-        windowRotation = b.rotation
-        val refresh = if (BehaviorPreferences.get(this).options.value.highRefreshRate) 120f else 0f
-        if (p.x == b.left && p.y == b.top && p.width == b.width && p.height == b.height && p.preferredRefreshRate == refresh) return
-        p.x = b.left; p.y = b.top; p.width = b.width; p.height = b.height
+        val expanded = isExpanded
+        val b = resolveBounds(expanded)
+        val options = BehaviorPreferences.get(this).options.value
+        val refresh = if (options.highRefreshRate) 120f else 0f
+        if (targetBounds == b && targetExpanded == expanded && p.preferredRefreshRate == refresh) return
+        windowAnimator?.cancel()
+        windowAnimator = null
+        targetBounds = b
+        targetExpanded = expanded
+        val fromCorner = windowCorner
+        val toCorner = if (expanded) 28f else 19f
         p.preferredRefreshRate = refresh
-        try { wm.updateViewLayout(v, p) } catch (e: RuntimeException) {
-            Log.e(TAG, "Window update failed", e)
-            fail("Android removed the overlay. Open Dynamic Island to restart it.")
+        windowRotation = if (expanded) 0f else b.rotation
+        panelVisible = false
+        // Outside touches are observed without covering or consuming another app's window.
+        p.flags = OverlayWindowPolicy.STANDARD_FLAGS or if (expanded) WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH else 0
+        val from = CapsuleAnchor.Window(p.x, p.y, p.width, p.height, 0f)
+        fun applyBounds(fraction: Float) {
+            windowCorner = fromCorner + (toCorner - fromCorner) * fraction
+            fun lerp(a: Int, end: Int) = (a + (end - a) * fraction).toInt()
+            p.x = lerp(from.left, b.left); p.y = lerp(from.top, b.top)
+            p.width = lerp(from.width, b.width); p.height = lerp(from.height, b.height)
+            try { wm.updateViewLayout(v, p) } catch (e: RuntimeException) {
+                Log.e(TAG, "Window update failed", e)
+                fail("Android removed the overlay. Open Dynamic Island to restart it.")
+            }
         }
+        val animateSize = from.width != b.width || from.height != b.height
+        if (!animate || !animateSize || options.reducedMotion || options.motion == MotionPreset.NONE || !ValueAnimator.areAnimatorsEnabled()) {
+            applyBounds(1f); panelVisible = expanded && !stopping
+        } else {
+            windowAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = if (options.motion == MotionPreset.RESPONSIVE) 180L else 260L
+                interpolator = DecelerateInterpolator(1.5f)
+                addUpdateListener { applyBounds(it.animatedValue as Float) }
+                addListener(object : AnimatorListenerAdapter() {
+                    private var cancelled = false
+                    override fun onAnimationCancel(animation: Animator) { cancelled = true }
+                    override fun onAnimationEnd(animation: Animator) {
+                        if (!cancelled && !stopping) panelVisible = expanded && isExpanded
+                    }
+                })
+                start()
+            }
+        }
+    }
+
+    private fun openPanel(secondary: Boolean) {
+        if (locked || keyguard?.isKeyguardLocked == true) return
+        if (isExpanded) { collapsePanel(); return }
+        if (repository.islandState.value is IslandState.Closed && repository.notificationCount.value == 0) {
+            idleExpanded = true
+            updateWindow(); updateBubble()
+        } else repository.sendUserCommand(if (secondary) IslandUserCommand.TapSecondary else IslandUserCommand.TapPrimary)
+    }
+
+    private fun collapsePanel() {
+        idleExpanded = false
+        panelVisible = false
+        repository.sendUserCommand(IslandUserCommand.CollapseExpanded)
+        repository.sendUserCommand(IslandUserCommand.CloseInbox)
+        // For an idle panel no arbiter state changes, so update immediately too.
+        updateWindow()
+        updateBubble()
+    }
+
+    private fun openSource(activity: IslandActivity) {
+        if (keyguard?.isKeyguardLocked == true) return
+        collapsePanel()
+        if (!com.dynamicisland.engine.util.PendingIntentCompat.send(this, activity.deepLinkIntent))
+            Toast.makeText(this, "Open the player from your app drawer", Toast.LENGTH_SHORT).show()
     }
 
     private fun updateVisibility() {
@@ -322,6 +437,12 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val interactive = getSystemService(PowerManager::class.java)?.isInteractive == true
         repository.eventBus.emitEvent(com.dynamicisland.engine.core.bus.SystemIngestionEvent.SystemState.KeyguardLocked(locked))
+        if (!interactive || locked) {
+            idleExpanded = false; panelVisible = false
+            windowAnimator?.cancel(); windowAnimator = null; targetBounds = null
+            repository.sendUserCommand(IslandUserCommand.CollapseExpanded)
+            repository.sendUserCommand(IslandUserCommand.CloseInbox)
+        }
         view?.visibility = if (!interactive || (locked && !o.showOnLockScreen) || (landscape && o.hideInLandscape)) View.GONE else View.VISIBLE
     }
 
@@ -340,6 +461,8 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
     }
 
     private fun fail(message: String) {
+        stopping = true
+        windowAnimator?.cancel(); windowAnimator = null
         _error.value = message
         removeBubble()
         _running.value = false
@@ -353,10 +476,11 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
             stopSelf(); return START_NOT_STICKY
         }
         if (intent?.action == ACTION_REFRESH_PERMISSIONS && ::repository.isInitialized) repository.refreshPermissions()
+        if (!stopping) { updateVisibility(); updateWindow(animate = false); updateBubble() }
         // User-enabled sticky restoration is still subject to Android/OEM background rules.
         return START_STICKY
     }
-    override fun onConfigurationChanged(newConfig: Configuration) { super.onConfigurationChanged(newConfig); updateWindow(); updateVisibility(); updateBubble() }
+    override fun onConfigurationChanged(newConfig: Configuration) { super.onConfigurationChanged(newConfig); targetBounds = null; updateVisibility(); updateWindow(animate = false); updateBubble() }
     override fun onTrimMemory(level: Int) { super.onTrimMemory(level); if (::repository.isInitialized) repository.onTrimMemory() }
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -376,6 +500,8 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
     }
 
     override fun onDestroy() {
+        stopping = true
+        windowAnimator?.cancel(); windowAnimator = null
         _running.value = false
         instance = null
         if (receiverRegistered) unregisterReceiver(screenReceiver)
@@ -388,6 +514,7 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
         registry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         if (::repository.isInitialized) repository.stop()
         scope.cancel(); store.clear()
+        _actionStatus.value = null
         _call.value = null; _battery.value = null
         _state.value = IslandState.Closed; _media.value = null; _playback.value = MediaPlaybackSnapshot()
         super.onDestroy()

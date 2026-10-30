@@ -3,7 +3,7 @@ name: island-motion-engine
 description: Edit numeric springs or content motion and reduced-motion behavior.
 ---
 
-Read core/src/main/kotlin/com/dynamicisland/core/{motion,physics}/ and engine/ui/motion/IslandMotionPreferences.kt. Keep retargeting interruption-safe, park idle clocks and keep primary geometry fixed.
+Read core/src/main/kotlin/com/dynamicisland/core/{motion,physics}/ and engine/ui/motion/IslandMotionPreferences.kt. Keep retargeting interruption-safe, park idle clocks and keep compact geometry fixed and user expansion bounded.
 
 ```sh
 ./gradlew :core:test

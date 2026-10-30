@@ -168,9 +168,9 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         DynamicIslandNotificationListener.ensureBound(this)
         refresh()
-        // Once both permissions exist the island should simply be running, like the system
-        // feature it mirrors. Respect explicit user stop preference.
-        if (overlayGranted && listenerGranted && !serviceRunning && behavior.options.value.enabled) {
+        // Overlay permission is enough to restore the capsule; listener access only
+        // enables live content. Respect the user's explicit Stop preference.
+        if (overlayGranted && !serviceRunning && behavior.options.value.enabled) {
             startIslandSafely()
             refreshSoon()
         }
@@ -511,6 +511,10 @@ private fun IslandHostScreen(
         ) {
             Text("Compatibility", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Medium)
             Text("ColorOS / realme UI: in App info → Battery usage, allow background activity if the island stops. Labels vary by firmware. Accessibility access is not used.", color = Color(0xFFB8C1BA), fontSize = 13.sp)
+            OutlinedButton(onClick = onOpenAppDetails, modifier = Modifier.fillMaxWidth()) {
+                Text("Open app battery & background settings")
+            }
+            Text("The island stays above ordinary apps while running. Android can hide overlays on protected screens and apps that block overlays.", color = Color(0xFFB8C1BA), fontSize = 13.sp)
             BehaviorToggle("System-bar touch clearance", "Keeps controls outside the status-bar touch area. Disable only to try exact camera overlap.", options.clearSystemBars) { onOptions(options.copy(clearSystemBars = it)) }
             BehaviorToggle("Show on lock screen", "Generic status only. Android or ColorOS may hide overlays on secure screens.", options.showOnLockScreen) { onOptions(options.copy(showOnLockScreen = it)) }
             BehaviorToggle("Prefer 120 Hz", "A display hint while visible; actual refresh rate is controlled by the phone.", options.highRefreshRate) { onOptions(options.copy(highRefreshRate = it)) }
@@ -559,7 +563,7 @@ private fun IslandHostScreen(
         Spacer(Modifier.height(22.dp))
 
         Text(
-            text = "Tap the capsule to open controls. Music and notifications keep the same capsule size. The play/pause control works when unlocked. System icons, secure screens and the notification shade keep Android’s priority.",
+            text = "Tap the capsule to expand controls in place. Tap the chevron, swipe up on its header, or tap outside to close. Music and notifications keep the compact size until you open it. System icons, secure screens and the notification shade keep Android’s priority.",
             color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp, lineHeight = 18.sp
         )
         Spacer(Modifier.height(14.dp))

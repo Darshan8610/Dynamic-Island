@@ -6,6 +6,7 @@ rules. compile/target API is 36. No physical OEM device has been validated here.
 | Capability | API / grant | Behavior and fallback |
 |---|---|---|
 | Capsule | API 28+, display-over-apps | Bounded application window; stops on app-op revocation; protected system UI retains priority. |
+| Expanded controls | Tap or configured gesture | Bounded in-place media/call/inbox panel; closes on outside touch, header swipe or chevron. |
 | Secondary bubble | API 28+, same grant, explicit opt-in | Independent window; omitted if no collision-free space; does not enlarge primary. |
 | Rotation/folding | Live WindowMetrics on API 30+, display metrics fallback | Follows cutout edge; clamps to viewport; device fold-state behavior still needs instrumentation. |
 | Lock screen | Explicit user option + OEM policy | Generic status only; no private titles/artwork or gestures; hidden with screen off. |

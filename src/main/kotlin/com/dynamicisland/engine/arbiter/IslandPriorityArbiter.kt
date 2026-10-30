@@ -71,7 +71,9 @@ class IslandPriorityArbiter(
     private val activeActivities = ConcurrentHashMap<String, IslandActivity>()
 
     // Currently expanded activity ID, if any
+    private var expansionPriorityAtSelection: Int? = null
     private var expandedActivityId: String? = null
+        set(value) { field = value; expansionPriorityAtSelection = null }
 
     // Active transient alert peek job and alert instance
     private var activeAlertPeek: TransientAlert? = null
@@ -904,11 +906,18 @@ class IslandPriorityArbiter(
                         is IslandState.Minimal -> {
                             expandedActivityId = current.primary.id
                         }
-                        // Tapping an alert dismisses it rather than launching it.
                         is IslandState.AlertPeek -> {
                             alertPeekJob?.cancel()
                             activeAlertPeek = null
                             activeAlertPeekStartedAt = 0L
+                            if (notificationInbox.any { it.key == current.alert.id }) {
+                                openInbox()
+                            } else when (val underlying = current.underlyingState) {
+                                is IslandState.Compact -> expandedActivityId = underlying.activity.id
+                                is IslandState.Minimal -> expandedActivityId = underlying.primary.id
+                                is IslandState.Expanded -> expandedActivityId = underlying.activity.id
+                                else -> Unit
+                            }
                         }
                         // A tap anywhere on the open card closes it, so the same
                         // gesture both opens and closes.
@@ -920,8 +929,11 @@ class IslandPriorityArbiter(
                 }
                 is IslandUserCommand.TapSecondary -> {
                     val current = _islandState.value
-                    if (current is IslandState.Minimal) {
+                    if (current is IslandState.Minimal && current.primary.rank != PriorityRank.EMERGENCY_OR_CALL) {
                         expandedActivityId = current.secondary.id
+                        // A deliberate secondary selection may coexist with the activity
+                        // already ahead of it. A newly higher priority event still preempts.
+                        expansionPriorityAtSelection = priorityOrder(current.primary)
                     }
                 }
                 is IslandUserCommand.LongPressPrimary -> {
@@ -1025,7 +1037,7 @@ class IslandPriorityArbiter(
                 // If a strictly higher-priority activity has arrived (e.g. Call preempting Media),
                 // collapse the lower-priority expanded activity so the higher-priority event is visible.
                 val highestRankOrder = sortedActivities.firstOrNull()?.let { priorityOrder(it) } ?: Int.MAX_VALUE
-                if (expandedActivity != null && priorityOrder(expandedActivity) <= highestRankOrder) {
+                if (expandedActivity != null && (expansionPriorityAtSelection ?: priorityOrder(expandedActivity)) <= highestRankOrder) {
                     IslandState.Expanded(
                         activity = expandedActivity,
                         regionData = expandedActivity.expandedData
@@ -1047,6 +1059,8 @@ class IslandPriorityArbiter(
         // Check if a Transient Alert Peek is active
         val alert = activeAlertPeek
         _islandState.value = when {
+            // An ordinary notification must not hide controls during a user interaction.
+            baseState is IslandState.Expanded && !inboxOpen -> baseState
             alert != null -> IslandState.AlertPeek(
                 alert = alert,
                 expiresAtMillis = activeAlertPeekStartedAt + alert.durationMillis,

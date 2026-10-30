@@ -213,6 +213,7 @@ fun MediaExpandedContent(
                         scrubFraction = f
                     },
                     onScrubMove = { f -> scrubFraction = f },
+                    onScrubCancel = { isScrubbing = false },
                     onScrubEnd = { f ->
                         isScrubbing = false
                         IslandHaptics.perform(hapticContext)
@@ -354,12 +355,14 @@ private fun IslandScrubber(
     onScrubStart: (Float) -> Unit,
     onScrubMove: (Float) -> Unit,
     onScrubEnd: (Float) -> Unit,
+    onScrubCancel: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
     val currentOnScrubStart by rememberUpdatedState(onScrubStart)
     val currentOnScrubMove by rememberUpdatedState(onScrubMove)
     val currentOnScrubEnd by rememberUpdatedState(onScrubEnd)
+    val currentOnScrubCancel by rememberUpdatedState(onScrubCancel)
 
     val baseKnobRadius = 4.5.dp
     val baseKnobRadiusPx = with(density) { baseKnobRadius.toPx() }
@@ -386,19 +389,24 @@ private fun IslandScrubber(
                     currentOnScrubStart(startFraction)
 
                     val pointerId = down.id
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == pointerId } ?: break
-                        if (!change.pressed) {
+                    var committed = false
+                    try {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == pointerId } ?: break
+                            if (change.isConsumed) break
                             change.consume()
                             lastFraction = xToFraction(change.position.x)
-                            break
+                            if (!change.pressed) {
+                                committed = true
+                                currentOnScrubEnd(lastFraction)
+                                break
+                            }
+                            currentOnScrubMove(lastFraction)
                         }
-                        change.consume()
-                        lastFraction = xToFraction(change.position.x)
-                        currentOnScrubMove(lastFraction)
+                    } finally {
+                        if (!committed) currentOnScrubCancel()
                     }
-                    currentOnScrubEnd(lastFraction)
                 }
             }
     ) {

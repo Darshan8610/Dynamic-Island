@@ -5,7 +5,11 @@ quiet-hour arithmetic, gesture eligibility, spring physics and motion math.
 
 The engine owns one event bus/repository, media/telephony/system/listener adapters,
 serialized priority arbitration and lifecycle-bound Compose overlay windows. The main
-capsule is bounded and fixed in size. An optional second bounded window holds a
+capsule is bounded and fixed in compact mode; explicit user input opens a bounded
+expanded card in the same window. ExpandedAnchor keeps controls inside safe display
+insets, and the service animates only this user-requested size change. Outside
+touch, close/header swipe, lock and screen-off dismiss expanded presentation.
+An optional second bounded window holds a
 secondary activity; the space between windows is never covered by an input surface.
 
 :app owns permission onboarding, dashboard cards, configuration, simulations, local

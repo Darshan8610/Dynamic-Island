@@ -50,7 +50,7 @@ class BootReceiver : BroadcastReceiver() {
 
                 // Auto-start the overlay service if overlay permission is granted
                 val options = BehaviorPreferences.get(context).options.value
-                if (options.enabled && options.startOnBoot && Settings.canDrawOverlays(context)) {
+                if (options.enabled && (action == Intent.ACTION_MY_PACKAGE_REPLACED || options.startOnBoot) && Settings.canDrawOverlays(context)) {
                     runCatching {
                         DynamicIslandService.start(context)
                         Log.i(TAG, "DynamicIslandService restored on boot/update.")

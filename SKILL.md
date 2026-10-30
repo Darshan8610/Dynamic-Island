@@ -13,6 +13,6 @@ with JDK 17/21 and Android SDK 36. For device work also run
 separate passed, failed and blocked outcomes. Investigate failures rather than
 suppressing assertions or artifact/TLS verification.
 
-Keep the primary capsule fixed and opaque. Optional secondary presentation uses
+Keep the compact capsule fixed and opaque; user-opened controls may expand within bounded windows. Optional secondary presentation uses
 its own bounded window. Do not promise precedence over protected system UI,
 scanner clearance, physical performance or publisher identity without evidence.
