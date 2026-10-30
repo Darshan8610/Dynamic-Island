@@ -88,20 +88,28 @@ class IslandUiTest {
         val context = compose.activity
         val device = UiDevice.getInstance(instrumentation)
         val listener = "${context.packageName}/com.dynamicisland.engine.ingestion.notifications.DynamicIslandNotificationListener"
-        fun waitForDescription(description: String): androidx.test.uiautomator.UiObject2 {
+        fun <T : Any> control(description: String, action: (androidx.test.uiautomator.UiObject2) -> T): T {
             compose.waitForIdle()
-            var control: androidx.test.uiautomator.UiObject2? = null
+            var result: T? = null
             try {
                 // ComposeRule owns every ComposeView's frame clock, including service windows.
                 // UIAutomator's wall-clock wait alone cannot drive their recompositions.
                 compose.waitUntil(20000) {
-                    control = device.findObject(androidx.test.uiautomator.By.desc(description))
-                    control != null
+                    try {
+                        val node = device.findObject(androidx.test.uiautomator.By.desc(description))
+                        if (node == null) false else {
+                            result = action(node)
+                            true
+                        }
+                    } catch (_: androidx.test.uiautomator.StaleObjectException) {
+                        // Track changes and window resizing replace virtual accessibility nodes.
+                        false
+                    }
                 }
             } catch (_: ComposeTimeoutException) {
                 // Preserve state/hierarchy below before cleanup removes the real overlay.
             }
-            control?.let { return it }
+            result?.let { return it }
             val options = BehaviorPreferences.get(context).options.value
             android.util.Log.e("IslandUiTest", "Missing=$description state=${DynamicIslandService.state.value} running=${DynamicIslandService.isRunning} error=${DynamicIslandService.error.value} mode=${options.interactionMode} tap=${options.tapAction}")
             val hierarchy = java.io.ByteArrayOutputStream()
@@ -121,26 +129,25 @@ class IslandUiTest {
             compose.waitUntil(30000) { DynamicIslandService.media.value?.title?.startsWith("Test track") == true }
             // Leave the host: controls must be part of the overlay above another app.
             device.pressHome()
-            val compact = waitForDescription("Primary island. Open controls")
-            val original = compact.visibleBounds
+            val original = control("Primary island. Open controls") { it.visibleBounds }
             device.click(original.centerX(), original.centerY())
-            waitForDescription("Next track").click()
+            control("Next track") { it.click() }
             compose.waitUntil(10000) { context.nextTracks == 1 }
-            waitForDescription("Previous track").click()
+            control("Previous track") { it.click() }
             compose.waitUntil(10000) { context.previousTracks == 1 }
-            waitForDescription("Pause").click()
+            control("Pause") { it.click() }
             compose.waitUntil(10000) { context.transportPauses == 1 }
-            waitForDescription("Play").click()
+            control("Play") { it.click() }
             compose.waitUntil(10000) { context.transportPlays == 1 }
             val folder=File(context.getExternalFilesDir(null),"screenshots").apply{mkdirs()}
             device.takeScreenshot(File(folder,"Expanded_media_overlay.png"))
-            waitForDescription("Collapse island").click()
-            val closed = waitForDescription("Primary island. Open controls").visibleBounds
+            control("Collapse island") { it.click() }
+            val closed = control("Primary island. Open controls") { it.visibleBounds }
             assertEquals(original, closed)
             device.click(closed.centerX(), closed.centerY())
-            waitForDescription("Collapse island")
+            control("Collapse island") { it.isEnabled }
             device.click(device.displayWidth/2, device.displayHeight*3/4)
-            waitForDescription("Primary island. Open controls")
+            control("Primary island. Open controls") { it.isEnabled }
             assertNull(device.findObject(androidx.test.uiautomator.By.desc("Collapse island")))
             // The same resolved "open controls" gesture must expand in Apple parity mode.
             compose.runOnUiThread {
@@ -149,10 +156,10 @@ class IslandUiTest {
                 }
             }
             device.waitForIdle()
-            waitForDescription("Primary island. Open controls").longClick()
-            waitForDescription("Next track")
-            waitForDescription("Collapse island").click()
-            waitForDescription("Primary island. Open controls")
+            control("Primary island. Open controls") { it.longClick() }
+            control("Next track") { it.isEnabled }
+            control("Collapse island") { it.click() }
+            control("Primary island. Open controls") { it.isEnabled }
             // Stop must remove the real window even after multiple open/close cycles.
             compose.runOnUiThread { DynamicIslandService.stop(context) }
             compose.waitUntil(10000) { !DynamicIslandService.isRunning }
