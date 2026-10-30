@@ -28,6 +28,20 @@ class IslandUiTest {
     @Before fun unlockTestDevice() {
         UiDevice.getInstance(instrumentation).wakeUp()
         shell("wm dismiss-keyguard")
+        compose.runOnUiThread {
+            BehaviorPreferences.get(compose.activity).update {
+                it.copy(interactionMode = com.dynamicisland.core.geometry.InteractionMode.ANDROID_CLASSIC, reducedMotion = true)
+            }
+        }
+    }
+
+    @Test fun staleTelemetryKeepsOpaqueBlackCapsule() {
+        compose.runOnUiThread { compose.activity.scenario = "Music"; compose.activity.stale = true }
+        compose.waitForIdle()
+        val bounds = compose.onNodeWithContentDescription("Primary island. Open controls", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
+        assertEquals(Color.BLACK, bitmap.getPixel(bounds.center.x.toInt(), bounds.center.y.toInt()))
     }
     @Test fun capturesAllCapsuleStatesWithoutChangingFootprint() {
         val cases=listOf("Idle","Music","Incoming call","Active call","Timer","Stopwatch","Navigation","Charging","Low battery","Bluetooth","Notification","Two activities")
@@ -111,6 +125,17 @@ class IslandUiTest {
             device.click(device.displayWidth/2, device.displayHeight*3/4)
             waitForDescription("Primary island. Open controls")
             assertNull(device.findObject(androidx.test.uiautomator.By.desc("Collapse island")))
+            // The same resolved "open controls" gesture must expand in Apple parity mode.
+            compose.runOnUiThread {
+                BehaviorPreferences.get(context).update {
+                    it.copy(interactionMode = com.dynamicisland.core.geometry.InteractionMode.APPLE_PARITY)
+                }
+            }
+            device.waitForIdle()
+            waitForDescription("Primary island. Open controls").longClick()
+            waitForDescription("Next track")
+            waitForDescription("Collapse island").click()
+            waitForDescription("Primary island. Open controls")
             // Stop must remove the real window even after multiple open/close cycles.
             compose.runOnUiThread { DynamicIslandService.stop(context) }
             compose.waitUntil(10000) { !DynamicIslandService.isRunning }

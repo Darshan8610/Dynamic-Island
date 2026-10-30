@@ -16,6 +16,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.paneTitle
@@ -66,9 +67,9 @@ fun IslandExpandedPanel(
     val contentHeight = (196 + (density.fontScale.coerceIn(1f, 2f) - 1) * 90).dp
 
     var cumulativeDragYPx by remember { mutableFloatStateOf(0f) }
-    var lastVelocityYPxPerSec by remember { mutableFloatStateOf(0f) }
+    val velocityTracker = remember { VelocityTracker() }
 
-    val scrubState = remember(cumulativeDragYPx) {
+    val scrubState = remember(cumulativeDragYPx, density, contentHeight) {
         ScrubCollapseController.interpolate(
             cumulativeDeltaYPx = cumulativeDragYPx,
             expandedWidthPx = with(density) { 366.dp.toPx() },
@@ -79,6 +80,7 @@ fun IslandExpandedPanel(
             compactRadiusDp = 18.5f
         )
     }
+    val currentScrubState by rememberUpdatedState(scrubState)
 
     val keylineColor = remember(activity?.keylineTintHex, options.enableKeylineTint) {
         if (!options.enableKeylineTint) Color.White.copy(alpha = 0.14f)
@@ -125,25 +127,25 @@ fun IslandExpandedPanel(
                         detectVerticalDragGestures(
                             onDragStart = {
                                 cumulativeDragYPx = 0f
-                                lastVelocityYPxPerSec = 0f
+                                velocityTracker.resetTracking()
                             },
                             onVerticalDrag = { change, amount ->
                                 change.consume()
                                 cumulativeDragYPx += amount
-                                lastVelocityYPxPerSec = amount * 60f
+                                velocityTracker.addPosition(change.uptimeMillis, change.position)
                             },
                             onDragEnd = {
                                 val shouldClose = ScrubCollapseController.shouldCollapseOnRelease(
-                                    progress = scrubState.progress,
-                                    velocityYPxPerSec = lastVelocityYPxPerSec
+                                    progress = currentScrubState.progress,
+                                    velocityYPxPerSec = velocityTracker.calculateVelocity().y
                                 ) || cumulativeDragYPx < -24.dp.toPx()
                                 cumulativeDragYPx = 0f
-                                lastVelocityYPxPerSec = 0f
+                                velocityTracker.resetTracking()
                                 if (shouldClose) close()
                             },
                             onDragCancel = {
                                 cumulativeDragYPx = 0f
-                                lastVelocityYPxPerSec = 0f
+                                velocityTracker.resetTracking()
                             }
                         )
                     }

@@ -1,11 +1,11 @@
-﻿package com.dynamicisland.engine.window
+package com.dynamicisland.engine.window
 
 import android.graphics.PixelFormat
 import android.os.Build
 import android.view.Gravity
 import android.view.WindowManager
 
-/** One bounded, touchable application window. Elevates to TYPE_ACCESSIBILITY_OVERLAY when active. */
+/** One bounded, touchable application window, owned by the foreground service. */
 object OverlayWindowPolicy {
     @Suppress("DEPRECATION")
     const val STANDARD_FLAGS = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -17,15 +17,10 @@ object OverlayWindowPolicy {
     fun createLayoutParams(
         width: Int,
         height: Int,
-        sdkInt: Int = Build.VERSION.SDK_INT,
-        useAccessibilityOverlay: Boolean = false
+        sdkInt: Int = Build.VERSION.SDK_INT
     ): WindowManager.LayoutParams {
         require(width > 0 && height > 0) { "Overlay must have bounded positive dimensions" }
-        val windowType = if (useAccessibilityOverlay) {
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
-        } else {
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        }
+        val windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         return WindowManager.LayoutParams(
             width, height,
             windowType, STANDARD_FLAGS,

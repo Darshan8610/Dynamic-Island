@@ -1,4 +1,4 @@
-﻿package com.dynamicisland.engine.service
+package com.dynamicisland.engine.service
 
 import android.animation.ValueAnimator
 import android.animation.Animator
@@ -199,11 +199,6 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
             registry.handleLifecycleEvent(Lifecycle.Event.ON_START)
             registry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
             attachWindow()
-            scope.launch {
-                DynamicIslandAccessibilityService.isAccessibilityEnabled.collect { a11yActive ->
-                    elevateWindowOverlay(a11yActive)
-                }
-            }
             scope.launch { repository.currentCall.collect { _call.value = it } }
             scope.launch { repository.batteryState.collect { _battery.value = it } }
             scope.launch { repository.islandState.collect {
@@ -293,11 +288,7 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
         }
         view = v
         val bounds = resolveBounds()
-                val isA11yActive = DynamicIslandAccessibilityService.activeServiceInstance != null
-        val p = OverlayWindowPolicy.createLayoutParams(
-            bounds.width, bounds.height,
-            useAccessibilityOverlay = isA11yActive
-        ).apply {
+        val p = OverlayWindowPolicy.createLayoutParams(bounds.width, bounds.height).apply {
             x = bounds.left; y = bounds.top
         }
         params = p
@@ -314,28 +305,6 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
         }
         updateVisibility()
         _running.value = true
-    }
-
-    private fun elevateWindowOverlay(a11yActive: Boolean) {
-        val v = view ?: return
-        val p = params ?: return
-        val targetType = if (a11yActive) {
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
-        } else {
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        }
-        if (p.type != targetType) {
-            p.type = targetType
-            runCatching {
-                if (v.isAttachedToWindow) {
-                    wm.removeViewImmediate(v)
-                    wm.addView(v, p)
-                    v.post { if (v.isAttachedToWindow) updateWindow(animate = false) }
-                }
-            }.onFailure {
-                Log.w(TAG, "Dynamic window elevation to $targetType failed", it)
-            }
-        }
     }
 
     private fun routeGesture(action: GestureAction, secondary: Boolean) {
@@ -386,8 +355,7 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
                     bubbleActivity?.let { activity -> FixedIslandCapsule(IslandState.Compact(activity),playback,locked,bubbleRotation,::openDashboard,{},prefs,{routeGesture(it,true)},secondary=true) }
                 }
             }
-            val isA11yActive = DynamicIslandAccessibilityService.activeServiceInstance != null
-            val p=OverlayWindowPolicy.createLayoutParams(bounds.width,bounds.height,useAccessibilityOverlay = isA11yActive).apply{x=bounds.left;y=bounds.top}
+            val p=OverlayWindowPolicy.createLayoutParams(bounds.width,bounds.height).apply{x=bounds.left;y=bounds.top}
             try { wm.addView(v,p);bubbleView=v;bubbleParams=p } catch(e:RuntimeException) { v.disposeComposition();_error.value="Secondary bubble could not attach. The primary island is still available.";Log.w(TAG,"Secondary window refused",e) }
         } else {
             val p=bubbleParams ?: return
@@ -508,10 +476,13 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
     private fun openPanel(secondary: Boolean) {
         if (locked || keyguard?.isKeyguardLocked == true) return
         if (isExpanded) { collapsePanel(); return }
-        if (repository.islandState.value is IslandState.Closed && repository.notificationCount.value == 0) {
+        val current = repository.islandState.value
+        if (current is IslandState.Closed && repository.notificationCount.value == 0) {
             idleExpanded = true
             updateWindow(); updateBubble()
-        } else repository.sendUserCommand(if (secondary) IslandUserCommand.TapSecondary else IslandUserCommand.TapPrimary)
+        } else repository.sendUserCommand(PanelExpansionPolicy.commandFor(
+            current, secondary, BehaviorPreferences.get(this).options.value.interactionMode
+        ))
     }
 
     private fun collapsePanel() {
