@@ -89,8 +89,18 @@ class IslandUiTest {
         val device = UiDevice.getInstance(instrumentation)
         val listener = "${context.packageName}/com.dynamicisland.engine.ingestion.notifications.DynamicIslandNotificationListener"
         fun waitForDescription(description: String): androidx.test.uiautomator.UiObject2 {
-            val control = device.wait(androidx.test.uiautomator.Until.findObject(androidx.test.uiautomator.By.desc(description)), 20000)
-            if (control != null) return control
+            var control: androidx.test.uiautomator.UiObject2? = null
+            try {
+                // ComposeRule owns every ComposeView's frame clock, including service windows.
+                // UIAutomator's wall-clock wait alone cannot drive their recompositions.
+                compose.waitUntil(20000) {
+                    control = device.findObject(androidx.test.uiautomator.By.desc(description))
+                    control != null
+                }
+            } catch (_: ComposeTimeoutException) {
+                // Preserve state/hierarchy below before cleanup removes the real overlay.
+            }
+            control?.let { return it }
             val options = BehaviorPreferences.get(context).options.value
             android.util.Log.e("IslandUiTest", "Missing=$description state=${DynamicIslandService.state.value} running=${DynamicIslandService.isRunning} error=${DynamicIslandService.error.value} mode=${options.interactionMode} tap=${options.tapAction}")
             val hierarchy = java.io.ByteArrayOutputStream()
