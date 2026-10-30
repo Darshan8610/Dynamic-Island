@@ -1,4 +1,4 @@
-package com.dynamicisland.engine.service
+﻿package com.dynamicisland.engine.service
 
 import android.animation.ValueAnimator
 import android.animation.Animator
@@ -273,7 +273,11 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
         }
         view = v
         val bounds = resolveBounds()
-        val p = OverlayWindowPolicy.createLayoutParams(bounds.width, bounds.height).apply {
+                val isA11yActive = DynamicIslandAccessibilityService.activeServiceInstance != null
+        val p = OverlayWindowPolicy.createLayoutParams(
+            bounds.width, bounds.height,
+            useAccessibilityOverlay = isA11yActive
+        ).apply {
             x = bounds.left; y = bounds.top
         }
         params = p

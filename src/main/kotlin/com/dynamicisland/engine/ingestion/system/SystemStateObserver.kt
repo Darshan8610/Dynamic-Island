@@ -1,4 +1,4 @@
-package com.dynamicisland.engine.ingestion.system
+﻿package com.dynamicisland.engine.ingestion.system
 
 import android.Manifest
 import android.app.KeyguardManager
@@ -12,6 +12,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.os.BatteryManager
 import android.os.Build
@@ -85,6 +86,11 @@ class SystemStateObserver(
     private val _batteryState = MutableStateFlow<SystemIngestionEvent.SystemState.Battery?>(null)
     val batteryState: StateFlow<SystemIngestionEvent.SystemState.Battery?> = _batteryState.asStateFlow()
 
+    private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
+    private val _isCameraInUse = MutableStateFlow(false)
+    val isCameraInUse: StateFlow<Boolean> = _isCameraInUse.asStateFlow()
+    private val unavailableCameras = mutableSetOf<String>()
+    private var cameraAvailabilityCallback: CameraManager.AvailabilityCallback? = null
     private val _isMicInUse = MutableStateFlow(false)
     val isMicInUse: StateFlow<Boolean> = _isMicInUse.asStateFlow()
 
@@ -103,6 +109,24 @@ class SystemStateObserver(
                 Intent.ACTION_SCREEN_OFF -> emitKeyguardLocked(true)
                 Intent.ACTION_USER_PRESENT -> emitKeyguardLocked(false)
                 Intent.ACTION_SCREEN_ON -> emitKeyguardLocked(keyguardManager?.isKeyguardLocked == true)
+        cameraManager?.let { cm ->
+            val cb = object : CameraManager.AvailabilityCallback() {
+                override fun onCameraUnavailable(cameraId: String) {
+                    synchronized(unavailableCameras) {
+                        unavailableCameras.add(cameraId)
+                        _isCameraInUse.value = unavailableCameras.isNotEmpty()
+                    }
+                }
+                override fun onCameraAvailable(cameraId: String) {
+                    synchronized(unavailableCameras) {
+                        unavailableCameras.remove(cameraId)
+                        _isCameraInUse.value = unavailableCameras.isNotEmpty()
+                    }
+                }
+            }
+            cameraAvailabilityCallback = cb
+            cm.registerAvailabilityCallback(cb, null)
+        }
             }
         }
     }
@@ -155,6 +179,24 @@ class SystemStateObserver(
         }
         lastRingerMode = audioManager?.ringerMode ?: AudioManager.RINGER_MODE_NORMAL
         emitKeyguardLocked(keyguardManager?.isKeyguardLocked == true)
+        cameraManager?.let { cm ->
+            val cb = object : CameraManager.AvailabilityCallback() {
+                override fun onCameraUnavailable(cameraId: String) {
+                    synchronized(unavailableCameras) {
+                        unavailableCameras.add(cameraId)
+                        _isCameraInUse.value = unavailableCameras.isNotEmpty()
+                    }
+                }
+                override fun onCameraAvailable(cameraId: String) {
+                    synchronized(unavailableCameras) {
+                        unavailableCameras.remove(cameraId)
+                        _isCameraInUse.value = unavailableCameras.isNotEmpty()
+                    }
+                }
+            }
+            cameraAvailabilityCallback = cb
+            cm.registerAvailabilityCallback(cb, null)
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             val cb = object : AudioManager.AudioRecordingCallback() {
@@ -182,6 +224,12 @@ class SystemStateObserver(
                 audioRecordingCallback = null
             }
         }
+        cameraAvailabilityCallback?.let { cb ->
+            runCatching { cameraManager?.unregisterAvailabilityCallback(cb) }
+            cameraAvailabilityCallback = null
+        }
+        synchronized(unavailableCameras) { unavailableCameras.clear() }
+        _isCameraInUse.value = false
         _isMicInUse.value = false
         batteryBaselineCaptured = false
         lastChargingState = false

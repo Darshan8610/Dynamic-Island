@@ -1,4 +1,4 @@
-package com.dynamicisland.engine.ui
+﻿package com.dynamicisland.engine.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -34,16 +34,21 @@ import com.dynamicisland.engine.ui.icons.IslandGlyph
 /** Activity content changes; the window and capsule footprint never depend on it. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun FixedIslandCapsule(state: IslandState, playback: MediaPlaybackSnapshot, locked: Boolean,
-    rotation: Float, onOpen: () -> Unit, onPlayPause: () -> Unit,
+fun FixedIslandCapsule(
+    state: IslandState,
+    playback: MediaPlaybackSnapshot,
+    locked: Boolean,
+    rotation: Float,
+    onOpen: () -> Unit,
+    onPlayPause: () -> Unit,
     options: BehaviorOptions = BehaviorOptions(),
     onGesture: ((GestureAction) -> Unit)? = null,
-    secondary: Boolean = false, cornerRadius: androidx.compose.ui.unit.Dp? = null,
-    microphoneActive: Boolean = false) {
-    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        val side = rotation == 90f || rotation == -90f
-        val w = if (side) maxHeight else maxWidth
-        val h = if (side) maxWidth else maxHeight
+    secondary: Boolean = false,
+    cornerRadius: androidx.compose.ui.unit.Dp? = null,
+    microphoneActive: Boolean = false,
+    cameraActive: Boolean = false
+) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val activity = when (state) {
             is IslandState.Compact -> state.activity
             is IslandState.Minimal -> state.primary
@@ -83,20 +88,22 @@ fun FixedIslandCapsule(state: IslandState, playback: MediaPlaybackSnapshot, lock
             MotionPreset.NONE -> 0; MotionPreset.GENTLE -> 180; MotionPreset.RESPONSIVE -> 90
         }
         val shape = if (cornerRadius != null) RoundedCornerShape(cornerRadius) else RoundedCornerShape(percent = 50)
-        Row(Modifier.requiredSize(w, h).graphicsLayer { rotationZ = rotation }
-            .clip(shape).background(Color.Black)
-            .border(if(options.appearance==AppearancePreset.HIGH_CONTRAST) 1.dp else 0.dp,if(options.appearance==AppearancePreset.HIGH_CONTRAST) Color.White else Color.Transparent,shape)
-            .pointerInput(locked,media) {
-                detectHorizontalDragGestures(onDragStart={drag=0f},
-                    onHorizontalDrag={ change, amount -> change.consume(); drag += amount },
-                    onDragEnd={ if(kotlin.math.abs(drag) >= 36.dp.toPx()) route(if(drag<0) currentOptions.swipeLeftAction else currentOptions.swipeRightAction);drag=0f },
-                    onDragCancel={drag=0f})
-            }
-            .combinedClickable(onClick = { route(options.tapAction) }, onLongClick = { route(options.holdAction) })
-            .semantics { contentDescription = if (locked) "Dynamic Island. Unlock to open controls" else if(secondary) "Secondary activity. ${activity?.title ?: "Open controls"}" else "Primary island. Open controls" }
-            .padding(horizontal = if(secondary) 4.dp else 8.dp),
+        Row(
+            Modifier.fillMaxSize().graphicsLayer { rotationZ = rotation }
+                .clip(shape).background(Color.Black)
+                .border(if(options.appearance==AppearancePreset.HIGH_CONTRAST) 1.dp else 0.dp,if(options.appearance==AppearancePreset.HIGH_CONTRAST) Color.White else Color.Transparent,shape)
+                .pointerInput(locked,media) {
+                    detectHorizontalDragGestures(onDragStart={drag=0f},
+                        onHorizontalDrag={ change, amount -> change.consume(); drag += amount },
+                        onDragEnd={ if(kotlin.math.abs(drag) >= 36.dp.toPx()) route(if(drag<0) currentOptions.swipeLeftAction else currentOptions.swipeRightAction);drag=0f },
+                        onDragCancel={drag=0f})
+                }
+                .combinedClickable(onClick = { route(options.tapAction) }, onLongClick = { route(options.holdAction) })
+                .semantics { contentDescription = if (locked) "Dynamic Island. Unlock to open controls" else if(secondary) "Secondary activity. ${activity?.title ?: "Open controls"}" else "Primary island. Open controls" }
+                .padding(horizontal = if(secondary) 4.dp else 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween) {
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
             Box(Modifier.size(26.dp), contentAlignment = Alignment.Center) {
                 if (image != null) Image(image, "Album cover", Modifier.size(24.dp).clip(RoundedCornerShape(5.dp)), contentScale = ContentScale.Crop)
                 else if (activity != null || state is IslandState.AlertPeek || locked) Crossfade(symbol, animationSpec = tween(duration), label="Activity icon") { glyph -> IslandGlyph(glyph, tint, Modifier.size(18.dp)) }
@@ -112,12 +119,23 @@ fun FixedIslandCapsule(state: IslandState, playback: MediaPlaybackSnapshot, lock
                 Text("•", color = tint, fontSize = 20.sp)
             } else if (!secondary) Spacer(Modifier.size(26.dp))
         }
-        if (!secondary && microphoneActive) {
-            // The platform exposes anonymized microphone recording configurations;
-            // this is an observed capture, not a replacement for the system indicator.
-            Box(Modifier.align(Alignment.CenterEnd).padding(end = 3.dp).size(5.dp)
-                .background(Color(0xFFFF9F0A), CircleShape)
-                .semantics { contentDescription = "Microphone recording detected" })
+
+        // Tri-state iOS-accurate Privacy Indicator Dot
+        val dotColor = when {
+            microphoneActive && cameraActive -> Color(0xFF0A84FF) // iOS Blue (Both)
+            cameraActive -> Color(0xFF30D158)                     // iOS Green (Camera)
+            microphoneActive -> Color(0xFFFF9F0A)                 // iOS Orange (Mic)
+            else -> null
+        }
+        if (!secondary && dotColor != null) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 4.dp)
+                    .size(6.dp)
+                    .background(dotColor, CircleShape)
+                    .semantics { contentDescription = "Privacy indicator active" }
+            )
         }
     }
 }

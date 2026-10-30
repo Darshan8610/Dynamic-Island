@@ -1,4 +1,4 @@
-package com.dynamicisland.engine.repository
+﻿package com.dynamicisland.engine.repository
 
 import android.content.ComponentName
 import android.content.Context
@@ -86,6 +86,7 @@ class DynamicIslandRepository(
 
     // Real-time microphone active state for privacy indicator dot
     val isMicrophoneInUse: StateFlow<Boolean> = systemStateObserver.isMicInUse
+    val isCameraInUse: StateFlow<Boolean> = systemStateObserver.isCameraInUse
 
     init {
         // UNDISPATCHED so the subscription is live before the constructor returns.

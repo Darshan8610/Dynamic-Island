@@ -1,4 +1,4 @@
-package com.dynamicisland.engine.ui.components
+﻿package com.dynamicisland.engine.ui.components
 
 import android.os.SystemClock
 import androidx.compose.animation.core.animateFloatAsState
@@ -445,29 +445,54 @@ private fun IslandScrubber(
         val knobCenter = Offset(trackLeft + filled, centerY)
 
         if (filled > 0f) {
-            // A soft line under the bright progress and a short fading trail at its head.
+            // 1. Soft gradient line along the active played track
             drawRoundRect(
-                color = Color.White.copy(alpha = .12f),
-                topLeft = Offset(trackLeft, centerY - trackHeight),
-                size = Size(filled, trackHeight * 2f), cornerRadius = CornerRadius(trackHeight)
-            )
-            drawRoundRect(
-                color = Color.White.copy(alpha = .8f),
+                brush = Brush.horizontalGradient(
+                    colors = listOf(Color(0x33FFFFFF), Color(0x66FFFFFF), Color.White),
+                    startX = trackLeft,
+                    endX = knobCenter.x
+                ),
                 topLeft = Offset(trackLeft, centerY - trackHeight / 2f),
-                size = Size(filled, trackHeight), cornerRadius = radius
+                size = Size(filled, trackHeight),
+                cornerRadius = radius
             )
-            val glowRadius = baseKnobRadiusPx * 3.2f * thumbScale
-            // Reuse one normalized shader instead of allocating a new gradient each frame.
-            for (step in 3 downTo 0) {
-                val distance = step * baseKnobRadiusPx * 1.5f
-                if (distance > filled) continue
-                withTransform({
-                    translate(knobCenter.x - distance, centerY)
-                    scale(glowRadius, glowRadius, Offset.Zero)
-                }) {
-                    drawCircle(SCRUBBER_GLOW_BRUSH, radius = 1f, center = Offset.Zero,
-                        alpha = if (step == 0) .9f else .12f * (4 - step))
-                }
+
+            // 2. Dynamic tapering luminous comet trail behind the knob
+            val trailLength = (baseKnobRadiusPx * 6f).coerceAtMost(filled)
+            if (trailLength > 0f) {
+                drawRoundRect(
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(Color.Transparent, Color(0x66FFFFFF), Color.White),
+                        startX = knobCenter.x - trailLength,
+                        endX = knobCenter.x
+                    ),
+                    topLeft = Offset(knobCenter.x - trailLength, centerY - (trackHeight * 1.5f) / 2f),
+                    size = Size(trailLength, trackHeight * 1.5f),
+                    cornerRadius = CornerRadius((trackHeight * 1.5f) / 2f)
+                )
+            }
+
+            // 3. Multi-tier luminous radial neon bloom glow centered on the knob
+            val glowRadius = baseKnobRadiusPx * 3.5f * thumbScale
+            withTransform({
+                translate(knobCenter.x, centerY)
+                scale(glowRadius, glowRadius, Offset.Zero)
+            }) {
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xFFFFFFFF),
+                            Color(0x99FFFFFF),
+                            Color(0x44FFFFFF),
+                            Color(0x11FFFFFF),
+                            Color.Transparent
+                        ),
+                        center = Offset.Zero,
+                        radius = 1f
+                    ),
+                    radius = 1f,
+                    center = Offset.Zero
+                )
             }
         }
 
