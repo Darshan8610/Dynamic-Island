@@ -13,8 +13,8 @@ android {
         minSdk = 28
         targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 7
-        versionName = "2.0"
+        versionCode = 8
+        versionName = "2.0.1"
     }
 
     lint {
@@ -38,12 +38,15 @@ android {
             keyPassword = signingKeyPassword
         }
     } else null
+    // Explicit opt-in for sideload testing; never commit signing material.
+    val developmentSigning = providers.gradleProperty("islandDevelopmentSigning").orNull == "true"
 
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            if(publisherSigning != null) signingConfig = publisherSigning
+            if (publisherSigning != null) signingConfig = publisherSigning
+            else if (developmentSigning) signingConfig = signingConfigs.getByName("debug")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

@@ -1094,11 +1094,13 @@ class IslandPriorityArbiter(
                     }
                 }
                 is IslandUserCommand.ExecuteAction -> {
-                    val activity = activeActivities[command.activityId]
-                    val action = activity?.actions?.firstOrNull { it.id == command.actionId }
-                    action?.let {
-                        intentToTrigger = it.pendingIntent
-                        callbackToTrigger = it.actionCallback
+                    if (!isKeyguardLocked) {
+                        val activity = activeActivities[command.activityId]
+                        val action = activity?.actions?.firstOrNull { it.id == command.actionId }
+                        action?.let {
+                            intentToTrigger = it.pendingIntent
+                            callbackToTrigger = it.actionCallback
+                        }
                     }
                 }
                 is IslandUserCommand.SeekMedia -> {

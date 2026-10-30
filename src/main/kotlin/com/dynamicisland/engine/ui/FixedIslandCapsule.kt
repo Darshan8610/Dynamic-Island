@@ -33,6 +33,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -139,7 +140,6 @@ fun FixedIslandCapsule(
             MotionPreset.RESPONSIVE -> 90
         }
 
-        val isLandscape = rotation == 90f || rotation == -90f
         val widthLimitedSpec = remember(isLandscape, options.landscapeBehavior) {
             if (options.landscapeBehavior == LandscapeBehavior.ADAPTIVE_LIMITED_WIDTH) {
                 ExpandedRegionLayoutSolver.resolveWidthLimitedCompact(isLandscape = isLandscape, availableCapsuleWidthDp = if (isLandscape) 96f else 125f)
@@ -220,7 +220,6 @@ fun FixedIslandCapsule(
                     rotationZ = rotation
                     scaleX = pressScale
                     scaleY = pressScale
-                    alpha = staleAlpha
                 }
                 .clip(shape)
                 .background(Color.Black)
@@ -229,6 +228,8 @@ fun FixedIslandCapsule(
                     color = parsedKeylineColor,
                     shape = shape
                 )
+                // Dim stale telemetry, while keeping the capsule's black backing opaque.
+                .graphicsLayer { alpha = staleAlpha }
                 .pointerInput(locked, media, state) {
                     detectHorizontalDragGestures(
                         onDragStart = { drag = 0f },
@@ -273,7 +274,12 @@ fun FixedIslandCapsule(
                     }
                 )
                 .semantics {
-                    contentDescription = a11yDescription
+                    contentDescription = when {
+                        locked -> "Dynamic Island. Unlock to open controls"
+                        secondary -> "Secondary island. Open controls"
+                        else -> "Primary island. Open controls"
+                    }
+                    stateDescription = a11yDescription
                     if (state is IslandState.AlertPeek) {
                         liveRegion = LiveRegionMode.Polite
                     }
@@ -315,7 +321,10 @@ fun FixedIslandCapsule(
                         IslandGlyph(glyph, tint, Modifier.size(18.dp))
                     }
                     options.idleMiniStatusBar && state is IslandState.Closed -> {
-                        val clockText = remember { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()) }
+                        val second = com.dynamicisland.engine.ui.util.rememberCurrentSecond()
+                        val clockText = remember(second / 60) {
+                            SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(second * 1000))
+                        }
                         Text(
                             text = clockText,
                             color = Color.White.copy(alpha = 0.85f),

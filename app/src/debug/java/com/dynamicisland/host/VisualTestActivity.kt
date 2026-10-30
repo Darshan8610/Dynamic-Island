@@ -21,6 +21,7 @@ import com.dynamicisland.engine.ui.FixedIslandCapsule
 /** Debug-only test harness. Never registered or packaged in release builds. */
 class VisualTestActivity : ComponentActivity() {
     var scenario by mutableStateOf("Idle")
+    var stale by mutableStateOf(false)
     var taps by mutableIntStateOf(0)
     var plays by mutableIntStateOf(0)
     var outsideTaps by mutableIntStateOf(0)
@@ -61,7 +62,11 @@ class VisualTestActivity : ComponentActivity() {
                     Text("Simulation · $scenario",color=Color.White)
                     Spacer(Modifier.height(40.dp))
                     Box(Modifier.size(130.dp,38.dp)) {
-                        FixedIslandCapsule(previewState(scenario),MediaPlaybackSnapshot(isActive=scenario=="Music",isPlaying=scenario=="Music",supportedActions=android.media.session.PlaybackState.ACTION_PLAY_PAUSE),false,0f,{taps++},{plays++},BehaviorOptions(reducedMotion=true))
+                        val state = previewState(scenario).let {
+                            if (it is com.dynamicisland.engine.core.model.IslandState.Compact)
+                                it.copy(activity = it.activity.copy(isStale = stale)) else it
+                        }
+                        FixedIslandCapsule(state,MediaPlaybackSnapshot(isActive=scenario=="Music",isPlaying=scenario=="Music",supportedActions=android.media.session.PlaybackState.ACTION_PLAY_PAUSE),false,0f,{taps++},{plays++},BehaviorOptions(reducedMotion=true))
                     }
                     Text("Tap count: $taps",color=Color.White)
                     Spacer(Modifier.height(100.dp))
