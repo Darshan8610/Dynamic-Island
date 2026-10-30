@@ -199,6 +199,11 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
             registry.handleLifecycleEvent(Lifecycle.Event.ON_START)
             registry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
             attachWindow()
+            scope.launch {
+                DynamicIslandAccessibilityService.isAccessibilityEnabled.collect { a11yActive ->
+                    elevateWindowOverlay(a11yActive)
+                }
+            }
             scope.launch { repository.currentCall.collect { _call.value = it } }
             scope.launch { repository.batteryState.collect { _battery.value = it } }
             scope.launch { repository.islandState.collect {
@@ -309,6 +314,28 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
         _running.value = true
     }
 
+    private fun elevateWindowOverlay(a11yActive: Boolean) {
+        val v = view ?: return
+        val p = params ?: return
+        val targetType = if (a11yActive) {
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+        } else {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        }
+        if (p.type != targetType) {
+            p.type = targetType
+            runCatching {
+                if (v.isAttachedToWindow) {
+                    wm.removeViewImmediate(v)
+                    wm.addView(v, p)
+                    v.post { if (v.isAttachedToWindow) updateWindow(animate = false) }
+                }
+            }.onFailure {
+                Log.w(TAG, "Dynamic window elevation to $targetType failed", it)
+            }
+        }
+    }
+
     private fun routeGesture(action: GestureAction, secondary: Boolean) {
         val current = repository.islandState.value
         val activity = if (secondary) bubbleActivity else when(current) {
@@ -355,7 +382,8 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
                     bubbleActivity?.let { activity -> FixedIslandCapsule(IslandState.Compact(activity),playback,locked,bubbleRotation,::openDashboard,{},prefs,{routeGesture(it,true)},secondary=true) }
                 }
             }
-            val p=OverlayWindowPolicy.createLayoutParams(bounds.width,bounds.height).apply{x=bounds.left;y=bounds.top}
+            val isA11yActive = DynamicIslandAccessibilityService.activeServiceInstance != null
+            val p=OverlayWindowPolicy.createLayoutParams(bounds.width,bounds.height,useAccessibilityOverlay = isA11yActive).apply{x=bounds.left;y=bounds.top}
             try { wm.addView(v,p);bubbleView=v;bubbleParams=p } catch(e:RuntimeException) { v.disposeComposition();_error.value="Secondary bubble could not attach. The primary island is still available.";Log.w(TAG,"Secondary window refused",e) }
         } else {
             val p=bubbleParams ?: return
@@ -448,7 +476,11 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
         } else {
             windowAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
                 duration = if (options.motion == MotionPreset.RESPONSIVE) 180L else 260L
-                interpolator = DecelerateInterpolator(1.5f)
+                interpolator = if (Build.VERSION.SDK_INT >= 21) {
+                    android.view.animation.PathInterpolator(0.16f, 1f, 0.3f, 1f)
+                } else {
+                    DecelerateInterpolator(1.5f)
+                }
                 addUpdateListener { applyBounds(it.animatedValue as Float) }
                 addListener(object : AnimatorListenerAdapter() {
                     private var cancelled = false

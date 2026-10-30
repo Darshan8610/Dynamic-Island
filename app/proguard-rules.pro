@@ -9,3 +9,7 @@
 
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+-keep public class com.dynamicisland.engine.service.DynamicIslandAccessibilityService { *; }
+-keep public class com.dynamicisland.engine.service.DynamicIslandService { *; }
+-keep class com.dynamicisland.engine.core.model.** { *; }

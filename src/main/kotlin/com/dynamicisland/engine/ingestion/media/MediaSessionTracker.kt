@@ -75,6 +75,11 @@ class MediaSessionTracker(
     private var currentArtFetchJob: Job? = null
     private val artGeneration = java.util.concurrent.atomic.AtomicLong()
 
+    // Optimistic seek tracking to eliminate scrubber snap-back glitch
+    @Volatile private var pendingSeekPositionMs: Long? = null
+    @Volatile private var pendingSeekTimestampElapsedRealtime: Long = 0L
+    private val PENDING_SEEK_TIMEOUT_MS = 1500L
+
     // Current primary controller driving the island
     private val _primaryController = MutableStateFlow<MediaController?>(null)
     val primaryController: StateFlow<MediaController?> = _primaryController.asStateFlow()
@@ -316,9 +321,21 @@ class MediaSessionTracker(
     private fun publishPlayback(controller: MediaController, state: PlaybackState?) {
         val isPlaying = state?.state == PlaybackState.STATE_PLAYING
         val playbackStateVal = state?.state ?: PlaybackState.STATE_NONE
-        val position = state?.position ?: 0L
+        val rawPosition = state?.position ?: 0L
+        val now = SystemClock.elapsedRealtime()
+        val pendingSeek = pendingSeekPositionMs
+        val position = if (pendingSeek != null) {
+            if (kotlin.math.abs(rawPosition - pendingSeek) < 1500L || now - pendingSeekTimestampElapsedRealtime > PENDING_SEEK_TIMEOUT_MS) {
+                pendingSeekPositionMs = null
+                rawPosition
+            } else {
+                pendingSeek
+            }
+        } else {
+            rawPosition
+        }
         val speed = state?.playbackSpeed ?: 1.0f
-        val lastUpdate = state?.lastPositionUpdateTime ?: SystemClock.elapsedRealtime()
+        val lastUpdate = state?.lastPositionUpdateTime ?: now
 
         val duration = runCatching {
             controller.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION)
@@ -673,7 +690,9 @@ class MediaSessionTracker(
             } else {
                 positionMs.coerceAtLeast(0L)
             }
-            controller.transportControls.seekTo(clamped)
+            pendingSeekPositionMs = clamped
+        pendingSeekTimestampElapsedRealtime = SystemClock.elapsedRealtime()
+        controller.transportControls.seekTo(clamped)
         } catch (e: Exception) {
             Log.w(TAG, "transportControls.seekTo($positionMs) failed", e)
         }
@@ -685,6 +704,10 @@ class MediaSessionTracker(
     fun getExtrapolatedPositionMs(): Long {
         val controller = _primaryController.value ?: return 0L
         val state = runCatching { controller.playbackState }.getOrNull() ?: return 0L
+        val pending = pendingSeekPositionMs
+        if (pending != null && SystemClock.elapsedRealtime() - pendingSeekTimestampElapsedRealtime < PENDING_SEEK_TIMEOUT_MS) {
+            return pending
+        }
         val pos = state.position
         val speed = state.playbackSpeed
         val lastUpdate = state.lastPositionUpdateTime

@@ -158,7 +158,9 @@ fun DynamicIslandView(
     /** Height size multiplier (0.50x to 1.40x). */
     islandHeightScale: Float = 1f,
     /** Real-time microphone active state for iOS-style orange dot privacy indicator. */
-    isMicrophoneInUse: Boolean = false
+    isMicrophoneInUse: Boolean = false,
+    /** Real-time camera active state for iOS-style green dot privacy indicator. */
+    isCameraInUse: Boolean = false
 ) {
     val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
@@ -889,10 +891,15 @@ fun DynamicIslandView(
                         CompactPillContent(
                             activity = compactAct,
                             isMicrophoneInUse = isMicrophoneInUse,
+                            isCameraInUse = isCameraInUse,
                             modifier = Modifier.fillMaxSize()
                         )
-                    } else if (isMicrophoneInUse) {
-                        // When idle/closed, if mic is in use, render the orange dot vertically centered on the right side
+                    } else if (isMicrophoneInUse || isCameraInUse) {
+                        val privacyColor = when {
+                            isMicrophoneInUse && isCameraInUse -> Color(0xFF0A84FF)
+                            isCameraInUse -> Color(0xFF30D158)
+                            else -> Color(0xFFFF9F0A)
+                        }
                         Row(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -904,7 +911,7 @@ fun DynamicIslandView(
                                 modifier = Modifier
                                     .size(6.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFFFF9500))
+                                    .background(privacyColor)
                             )
                         }
                     }
@@ -1077,6 +1084,7 @@ private fun ActivityKind.isTimerLike(): Boolean =
 private fun CompactPillContent(
     activity: IslandActivity,
     isMicrophoneInUse: Boolean = false,
+    isCameraInUse: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -1100,12 +1108,17 @@ private fun CompactPillContent(
             Box(contentAlignment = Alignment.CenterEnd) {
                 RenderSlot(activity.compactTrailing)
             }
-            if (isMicrophoneInUse) {
+            if (isMicrophoneInUse || isCameraInUse) {
+                val dotColor = when {
+                    isMicrophoneInUse && isCameraInUse -> Color(0xFF0A84FF)
+                    isCameraInUse -> Color(0xFF30D158)
+                    else -> Color(0xFFFF9F0A)
+                }
                 Box(
                     modifier = Modifier
                         .size(6.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFFFF9500))
+                        .background(dotColor)
                 )
             }
         }
