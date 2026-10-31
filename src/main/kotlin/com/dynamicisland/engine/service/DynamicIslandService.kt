@@ -1,4 +1,4 @@
-﻿package com.dynamicisland.engine.service
+package com.dynamicisland.engine.service
 
 import android.animation.ValueAnimator
 import android.animation.Animator
@@ -31,24 +31,15 @@ import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.compose.runtime.*
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.app.NotificationCompat
@@ -67,6 +58,7 @@ import com.dynamicisland.engine.repository.DynamicIslandRepository
 import com.dynamicisland.engine.settings.BehaviorPreferences
 import com.dynamicisland.engine.settings.IslandSettings
 import com.dynamicisland.engine.ui.FixedIslandCapsule
+import com.dynamicisland.engine.ui.components.PrivacyIndicatorDot
 import com.dynamicisland.engine.window.OverlayWindowPolicy
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -143,7 +135,10 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
     private lateinit var wm: WindowManager
     private lateinit var overlayContext: Context
     private var idleExpanded by mutableStateOf(false)
-    private var panelVisible by mutableStateOf(false)
+    /** Expanded-content crossfade weight (0f = compact only, 1f = expanded only). */
+    private var panelAlpha by mutableFloatStateOf(0f)
+    /** Compact-content crossfade weight; fades out fast while the panel expands. */
+    private var compactAlpha by mutableFloatStateOf(1f)
     private var windowAnimator: ValueAnimator? = null
     private var targetBounds: CapsuleAnchor.Window? = null
     private var targetExpanded = false
@@ -249,44 +244,52 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
                 val status by repository.priorityArbiter.actionStatus.collectAsState()
                 val microphoneActive by repository.isMicrophoneInUse.collectAsState()
                 val cameraActive by repository.isCameraInUse.collectAsState()
-                val animateContent = !options.reducedMotion && options.motion != MotionPreset.NONE && ValueAnimator.areAnimatorsEnabled()
+                val expanded = state is IslandState.Expanded || state is IslandState.NotificationInbox || idleExpanded
                 Box(Modifier.fillMaxSize()) {
-                    if (!panelVisible || locked) FixedIslandCapsule(state, playback, locked, windowRotation,
-                        onOpen = { openPanel(false) },
-                        onPlayPause = { if (!locked && keyguard?.isKeyguardLocked != true) { IslandHaptics.perform(this@DynamicIslandService);playPause() } },
-                        options = options, onGesture = { routeGesture(it,false) },
-                        cornerRadius = androidx.compose.ui.unit.Dp(windowCorner),
-                        microphoneActive = microphoneActive,
-                        cameraActive = cameraActive,
-                        isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
-                    // Removing this subtree immediately on lock avoids retaining private content
-                    // during an exit animation. Re-targeting visibility cancels any entrance.
-                    if (!locked) AnimatedVisibility(visible = panelVisible,
-                        enter = if (animateContent) fadeIn(tween(120)) + scaleIn(initialScale = .98f, animationSpec = tween(160)) else EnterTransition.None,
-                        exit = ExitTransition.None) {
-                        IslandExpandedPanel(state, playback, call, count,
-                            onClose = ::collapsePanel, onOpenApp = ::openDashboard,
-                            onOpenSource = ::openSource,
-                            onPlayPause = ::playPause, onNext = ::next, onPrevious = ::previous,
-                            onSeek = ::seek, onCommand = ::command,
-                            onAnswer = ::answer, onHangup = ::hangup, onMute = ::toggleMute,
-                            onSpeaker = ::toggleSpeaker, actionStatus = status,
-                            options = options)
+                    // Compact layer: always composed and crossfaded by [compactAlpha], so the
+                    // pill content eases out instead of snapping the moment expansion starts.
+                    Box(Modifier.fillMaxSize().alpha(compactAlpha)) {
+                        FixedIslandCapsule(state, playback, locked, windowRotation,
+                            onOpen = { openPanel(false) },
+                            onPlayPause = { if (!locked && keyguard?.isKeyguardLocked != true) { IslandHaptics.perform(this@DynamicIslandService);playPause() } },
+                            options = options, onGesture = { routeGesture(it,false) },
+                            cornerRadius = androidx.compose.ui.unit.Dp(windowCorner),
+                            microphoneActive = microphoneActive,
+                            cameraActive = cameraActive,
+                            isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
                     }
-                    if (panelVisible && !locked && (microphoneActive || cameraActive)) {
-                        val privacyColor = when {
-                            microphoneActive && cameraActive -> Color(0xFF0A84FF)
-                            cameraActive -> Color(0xFF30D158)
-                            else -> Color(0xFFFF9F0A)
+                    // Expanded layer: revealed progressively alongside the growing window.
+                    // This removes the previous two-stage pop-in (window grew first, then the
+                    // card faded in) — the card is now uncovered frame-by-frame as it morphs.
+                    if (!locked && (expanded || panelAlpha > 0.01f)) {
+                        Box(Modifier.fillMaxSize().alpha(panelAlpha)) {
+                            IslandExpandedPanel(state, playback, call, count,
+                                onClose = ::collapsePanel, onOpenApp = ::openDashboard,
+                                onOpenSource = ::openSource,
+                                onPlayPause = ::playPause, onNext = ::next, onPrevious = ::previous,
+                                onSeek = ::seek, onCommand = ::command,
+                                onAnswer = ::answer, onHangup = ::hangup, onMute = ::toggleMute,
+                                onSpeaker = ::toggleSpeaker, actionStatus = status,
+                                options = options)
                         }
-                        val privacyDesc = when {
-                            microphoneActive && cameraActive -> "Microphone and camera in use"
-                            cameraActive -> "Camera in use"
-                            else -> "Microphone in use"
-                        }
-                        Box(Modifier.align(Alignment.CenterEnd).padding(end = 3.dp).size(5.dp)
-                            .background(privacyColor, CircleShape)
-                            .semantics { contentDescription = privacyDesc })
+                    }
+                    // Privacy indicator: detached to the right of the active pill, on the
+                    // pill's vertical centreline — never pinned to a corner.
+                    if (!locked && (expanded || panelAlpha > 0.5f) && (microphoneActive || cameraActive)) {
+                        PrivacyIndicatorDot(
+                            microphoneActive = microphoneActive,
+                            cameraActive = cameraActive,
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(end = 16.dp)
+                                .semantics {
+                                    contentDescription = when {
+                                        microphoneActive && cameraActive -> "Microphone and camera in use"
+                                        cameraActive -> "Camera in use"
+                                        else -> "Microphone in use"
+                                    }
+                                }
+                        )
                     }
                 }
             }
@@ -463,12 +466,17 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
         // Android may choose a different mode for thermal, power or policy reasons.
         if (Build.VERSION.SDK_INT >= 35) v.requestedFrameRate = refresh
         windowRotation = if (expanded) 0f else b.rotation
-        panelVisible = false
         // Outside touches are observed without covering or consuming another app's window.
         p.flags = OverlayWindowPolicy.STANDARD_FLAGS or if (expanded) WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH else 0
         val from = CapsuleAnchor.Window(p.x, p.y, p.width, p.height, 0f)
         fun applyBounds(fraction: Float) {
             windowCorner = fromCorner + (toCorner - fromCorner) * fraction
+            // Crossfade the content with the geometry so the expanded card is uncovered
+            // progressively as the window morphs (no two-stage pop-in, no jump). The layer
+            // leaving the screen fades out over the first 40% of the travel.
+            val fade = 0.4f
+            panelAlpha = if (expanded) fraction else (1f - fraction / fade).coerceIn(0f, 1f)
+            compactAlpha = if (expanded) (1f - fraction / fade).coerceIn(0f, 1f) else fraction
             fun lerp(a: Int, end: Int) = (a + (end - a) * fraction).toInt()
             val x = lerp(from.left, b.left); val y = lerp(from.top, b.top)
             val width = lerp(from.width, b.width); val height = lerp(from.height, b.height)
@@ -483,7 +491,8 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
         }
         val animateSize = from.width != b.width || from.height != b.height
         if (!animate || !animateSize || options.reducedMotion || options.motion == MotionPreset.NONE || !ValueAnimator.areAnimatorsEnabled()) {
-            applyBounds(1f); panelVisible = expanded && !stopping
+            applyBounds(1f)
+            if (stopping) { panelAlpha = 0f; compactAlpha = 1f }
         } else {
             windowAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
                 duration = if (options.motion == MotionPreset.RESPONSIVE) 180L else 260L
@@ -497,7 +506,7 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
                     private var cancelled = false
                     override fun onAnimationCancel(animation: Animator) { cancelled = true }
                     override fun onAnimationEnd(animation: Animator) {
-                        if (!cancelled && !stopping) panelVisible = expanded && isExpanded
+                        if (!cancelled && !stopping) applyBounds(1f)
                     }
                 })
                 start()
@@ -516,7 +525,6 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
 
     private fun collapsePanel() {
         idleExpanded = false
-        panelVisible = false
         repository.sendUserCommand(IslandUserCommand.CollapseExpanded)
         repository.sendUserCommand(IslandUserCommand.CloseInbox)
         // For an idle panel no arbiter state changes, so update immediately too.
@@ -538,7 +546,9 @@ class DynamicIslandService : Service(), LifecycleOwner, SavedStateRegistryOwner,
         val interactive = getSystemService(PowerManager::class.java)?.isInteractive == true
         repository.eventBus.emitEvent(com.dynamicisland.engine.core.bus.SystemIngestionEvent.SystemState.KeyguardLocked(locked))
         if (!interactive || locked) {
-            idleExpanded = false; panelVisible = false
+            idleExpanded = false
+            // Return to the compact shell instantly: no expanded content, no privacy dot.
+            panelAlpha = 0f; compactAlpha = 1f
             windowAnimator?.cancel(); windowAnimator = null; targetBounds = null
             repository.sendUserCommand(IslandUserCommand.CollapseExpanded)
             repository.sendUserCommand(IslandUserCommand.CloseInbox)

@@ -13,7 +13,6 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -44,6 +43,7 @@ import com.dynamicisland.core.privacy.LockStatePrivacyPolicy
 import com.dynamicisland.engine.core.model.*
 import com.dynamicisland.engine.settings.BehaviorOptions
 import com.dynamicisland.engine.ui.components.AudioWaveformEqualizer
+import com.dynamicisland.engine.ui.components.PrivacyIndicatorDot
 import com.dynamicisland.engine.ui.icons.IslandGlyph
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -396,20 +396,16 @@ fun FixedIslandCapsule(
             }
         }
 
-        // Tri-state iOS-accurate Privacy Indicator Dot
-        val dotColor = when {
-            microphoneActive && cameraActive -> Color(0xFF0A84FF) // iOS Blue (Both)
-            cameraActive -> Color(0xFF30D158)                     // iOS Green (Camera)
-            microphoneActive -> Color(0xFFFF9F0A)                 // iOS Orange (Mic)
-            else -> null
-        }
-        if (!secondary && dotColor != null) {
-            Box(
-                Modifier
+        // Tri-state iOS-accurate Privacy Indicator Dot — 4 dp, right edge,
+        // vertically centred. Never pinned to a corner.
+        if (!secondary && (microphoneActive || cameraActive)) {
+            Spacer(modifier = Modifier.width(10.dp))
+            PrivacyIndicatorDot(
+                microphoneActive = microphoneActive,
+                cameraActive = cameraActive,
+                modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .padding(end = 4.dp)
-                    .size(6.dp)
-                    .background(dotColor, CircleShape)
                     .semantics { contentDescription = "Privacy indicator active" }
             )
         }
