@@ -99,25 +99,27 @@ data class MediaPlaybackSnapshot(
 ) {
     val canPlayPause: Boolean
         get() {
+            // PlaybackState.ACTION_* are Int flags; supportedActions is a Long
+            // bitmask (from PlaybackState.getActions()). AND them in Long space.
             val mask = if (isPlaying) {
-                android.media.session.PlaybackState.ACTION_PAUSE or
-                    android.media.session.PlaybackState.ACTION_PLAY_PAUSE
+                (android.media.session.PlaybackState.ACTION_PAUSE or
+                    android.media.session.PlaybackState.ACTION_PLAY_PAUSE).toLong()
             } else {
-                android.media.session.PlaybackState.ACTION_PLAY or
-                    android.media.session.PlaybackState.ACTION_PLAY_PAUSE
+                (android.media.session.PlaybackState.ACTION_PLAY or
+                    android.media.session.PlaybackState.ACTION_PLAY_PAUSE).toLong()
             }
             return (supportedActions and mask) != 0L
         }
 
     val canNext: Boolean
-        get() = (supportedActions and android.media.session.PlaybackState.ACTION_SKIP_TO_NEXT) != 0L
+        get() = (supportedActions and android.media.session.PlaybackState.ACTION_SKIP_TO_NEXT.toLong()) != 0L
 
     val canPrevious: Boolean
-        get() = (supportedActions and android.media.session.PlaybackState.ACTION_SKIP_TO_PREVIOUS) != 0L
+        get() = (supportedActions and android.media.session.PlaybackState.ACTION_SKIP_TO_PREVIOUS.toLong()) != 0L
 
     val canSeek: Boolean
         get() = durationMs > 0L &&
-            (supportedActions and android.media.session.PlaybackState.ACTION_SEEK_TO) != 0L
+            (supportedActions and android.media.session.PlaybackState.ACTION_SEEK_TO.toLong()) != 0L
 
     fun positionAt(nowElapsedRealtime: Long): Long = currentPositionMs(nowElapsedRealtime)
 

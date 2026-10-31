@@ -1,6 +1,5 @@
 package com.dynamicisland.host
 
-import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap

@@ -1,6 +1,5 @@
 package com.dynamicisland.engine
 
-import android.app.PendingIntent
 import com.dynamicisland.engine.core.model.*
 import com.dynamicisland.engine.core.bus.*
 import com.dynamicisland.engine.arbiter.IslandPriorityArbiter
