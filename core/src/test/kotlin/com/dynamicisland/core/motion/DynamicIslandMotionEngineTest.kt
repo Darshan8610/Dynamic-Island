@@ -1,6 +1,5 @@
 package com.dynamicisland.core.motion
 
-import com.dynamicisland.core.physics.CatalogEntry
 import com.dynamicisland.core.physics.SpringCatalog
 import com.dynamicisland.core.physics.SpringSimulation
 import com.dynamicisland.core.physics.SpringSpec

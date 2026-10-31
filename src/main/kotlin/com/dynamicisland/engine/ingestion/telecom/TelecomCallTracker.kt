@@ -8,7 +8,6 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.SystemClock
 import android.telecom.Call
-import android.telecom.CallAudioState
 import android.telephony.PhoneStateListener
 import android.telephony.TelephonyCallback
 import android.telephony.TelephonyManager

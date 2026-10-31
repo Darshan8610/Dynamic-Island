@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -54,7 +53,6 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalContext
 import com.dynamicisland.engine.ui.IslandHaptics
 import com.dynamicisland.engine.ui.motion.islandMotionSpec
@@ -68,7 +66,6 @@ import com.dynamicisland.engine.core.model.IslandSymbol
 import com.dynamicisland.engine.core.model.MediaPlaybackSnapshot
 import com.dynamicisland.engine.ui.icons.IslandGlyph
 import com.dynamicisland.engine.ui.icons.drawSkipGlyph
-import com.dynamicisland.engine.ui.motion.SpringPhysicsSpecs
 import com.dynamicisland.engine.ui.squircle.SquircleShape
 import com.dynamicisland.engine.ui.util.rememberElapsedTicker
 
